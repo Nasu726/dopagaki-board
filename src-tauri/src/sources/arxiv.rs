@@ -1,5 +1,6 @@
-use crate::db::cache::CacheWriteItem;
+use crate::{db::cache::CacheWriteItem, source_config};
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use std::time::Duration;
 use tokio::{sync::Mutex, time::Instant};
 
@@ -122,6 +123,23 @@ impl ArxivClient {
 
         parse_feed(&body, canonical_source_config_json, fetched_at)
     }
+}
+
+pub(crate) fn normalize_config(input: &str) -> Result<String, String> {
+    let config = parse_config(input)?;
+    let mut sparse = Map::new();
+
+    if config.max_results != DEFAULT_MAX_RESULTS {
+        sparse.insert(
+            "maxResults".to_owned(),
+            Value::from(u64::try_from(config.max_results).unwrap_or(u64::MAX)),
+        );
+    }
+    if config.query != DEFAULT_QUERY {
+        sparse.insert("query".to_owned(), Value::String(config.query));
+    }
+
+    source_config::canonicalize(&Value::Object(sparse).to_string())
 }
 
 fn parse_config(canonical_source_config_json: &str) -> Result<ArxivConfig, String> {
@@ -263,6 +281,30 @@ mod tests {
         let config = parse_config("{}").expect("default config should parse");
         assert_eq!(config.query, DEFAULT_QUERY);
         assert_eq!(config.max_results, DEFAULT_MAX_RESULTS);
+    }
+
+    #[test]
+    fn semantic_defaults_collapse_to_sparse_canonical_identity() {
+        assert_eq!(normalize_config("{}").unwrap(), "{}");
+        assert_eq!(
+            normalize_config(r#"{"query":"cat:cs.AI","maxResults":12}"#).unwrap(),
+            "{}"
+        );
+        assert_eq!(
+            normalize_config(r#"{"query":"  cat:cs.LG  ","maxResults":12}"#).unwrap(),
+            r#"{"query":"cat:cs.LG"}"#
+        );
+        assert_eq!(
+            normalize_config(r#"{"maxResults":5}"#).unwrap(),
+            r#"{"maxResults":5}"#
+        );
+    }
+
+    #[test]
+    fn invalid_config_is_rejected_before_persistence_or_fetch() {
+        assert!(normalize_config(r#"{"query":"   "}"#).is_err());
+        assert!(normalize_config(r#"{"maxResults":0}"#).is_err());
+        assert!(normalize_config(r#"{"unknown":true}"#).is_err());
     }
 
     #[test]

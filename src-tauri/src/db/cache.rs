@@ -78,7 +78,7 @@ pub(crate) fn seed_demo_items(connection: &Connection, now: i64) -> Result<()> {
 pub(crate) fn list_top(connection: &Connection, limit: usize) -> Result<Vec<CachedItem>> {
     let limit = i64::try_from(limit.min(100)).unwrap_or(100);
     let mut statement = connection.prepare(
-        "SELECT id, source_kind, source_config_json, external_url, title, image_url, author,\n                published_at, fetched_at, score, is_unseen\n         FROM feed_items\n         ORDER BY is_unseen DESC, score DESC, fetched_at DESC\n         LIMIT ?1",
+        "SELECT id, source_kind, source_config_json, external_url, title, image_url, author,\n                published_at, fetched_at, score, is_unseen\n         FROM (\n           SELECT id, source_kind, source_config_json, external_url, title, image_url, author,\n                  published_at, fetched_at, score, is_unseen,\n                  ROW_NUMBER() OVER (\n                    PARTITION BY id\n                    ORDER BY is_unseen DESC, score DESC, fetched_at DESC, source_kind, source_config_json\n                  ) AS duplicate_rank\n           FROM feed_items\n         )\n         WHERE duplicate_rank = 1\n         ORDER BY is_unseen DESC, score DESC, fetched_at DESC, id\n         LIMIT ?1",
     )?;
 
     let rows = statement.query_map([limit], map_item)?;
@@ -172,6 +172,40 @@ mod tests {
         mark_seen(&connection, &[arxiv[0].id.clone()]).expect("seen should update");
         let arxiv = list_for_source(&connection, "arxiv", "{}", 5).expect("source should read");
         assert!(!arxiv[0].is_unseen);
+    }
+
+    #[test]
+    fn top_cache_deduplicates_same_item_across_source_configs() {
+        let connection = database();
+        for (config, score) in [
+            ("{\"query\":\"graph\"}", 90.0),
+            ("{\"query\":\"hypergraph\"}", 100.0),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO feed_items (\n                       id, source_kind, source_config_json, external_url, title, fetched_at, score, is_unseen\n                     ) VALUES (?1, 'arxiv', ?2, ?3, ?4, 123, ?5, 1)",
+                    params![
+                        "arxiv:paper:1",
+                        config,
+                        "https://arxiv.org/abs/1",
+                        "Shared paper",
+                        score
+                    ],
+                )
+                .expect("source-scoped cache row should insert");
+        }
+
+        let top = list_top(&connection, 10).expect("top cache should read");
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].source_config_json, "{\"query\":\"hypergraph\"}");
+
+        mark_seen(&connection, &["arxiv:paper:1".to_owned()]).expect("seen should update globally");
+        let graph = list_for_source(&connection, "arxiv", "{\"query\":\"graph\"}", 5)
+            .expect("first source should read");
+        let hypergraph = list_for_source(&connection, "arxiv", "{\"query\":\"hypergraph\"}", 5)
+            .expect("second source should read");
+        assert!(!graph[0].is_unseen);
+        assert!(!hypergraph[0].is_unseen);
     }
 
     #[test]

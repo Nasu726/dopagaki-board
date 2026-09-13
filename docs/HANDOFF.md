@@ -18,15 +18,16 @@ Merged to `main`:
 - PR #26: event/deadline-driven refresh runtime + first real arXiv adapter
 - PR #27: current `src-tauri/Cargo.lock` + `--locked` Rust CI on Linux/Windows/macOS
 - PR #34: first post-runtime deletion/simplification pass
+- PR #40: editable validated arXiv widget source settings + contextual Board editor
+- PR #38: committed frontend lockfile + `npm ci` across Linux/Windows/macOS CI
 
-Issue #5 (cache/scheduler), Issue #15 (Rust lockfile/reproducibility), Issue #21 (runtime/arXiv), and Issue #28 (first simplification pass) are complete.
+Issue #5 (cache/scheduler), Issue #15 (Rust lockfile/reproducibility), Issue #21 (runtime/arXiv), Issue #28 (first simplification pass), and Issue #35 (editable arXiv widget source configuration) are complete.
 
-Current product branch: `feat-widget-source-config`.
-Current product issue: #35, editable source configuration for Board widgets. This is the final planned MVP feature slice before treating the current app as a usable first-complete checkpoint.
+**Functional MVP checkpoint reached.** There is no active product feature branch. Idle / Compact / free-form Board, cached presentation, event-driven refresh, one real arXiv adapter, manual/automatic refresh, and contextual arXiv query/result-count editing are all on `main`, with Linux/Windows/macOS CI green on the merge candidate.
 
-The first implementation targets arXiv only: query + bounded result count, source-specific validation, canonical sparse configuration, contextual widget-local editor, and narrow cache rehydration. Do not expose raw JSON in the normal UI and do not invent a generic settings framework until another adapter demonstrates a common schema.
+This is a first-complete usability checkpoint, not a claim that product validation is finished. The next product-facing work should come from real desktop use: capture the pending Idle CPU/RSS baseline, inspect small/wide/half-screen behavior, and fix observed friction before adding adapters indiscriminately. Figma comparison/mock work is intentionally deferred and is not required for the current direction; revisit it only if real-use feedback exposes a design problem that benefits from a visual exploration step.
 
-Independent maintenance work exists in PR #38 (npm lockfile / `npm ci`) and stacked PR #39 (measured Rust/npm CI caching). Keep those maintenance changes separate from #35.
+Maintenance stream: PR #38 established `package-lock.json` + `npm ci`. The measured cache experiment from old stacked PR #39 was rebuilt cleanly as PR #41 after #38 merged; #39 is superseded. Keep maintenance changes separate from product behavior.
 
 Accidental duplicate Issues #29–#33 were created during tool setup and immediately closed as not planned.
 
@@ -46,7 +47,8 @@ Windows/macOS cold CI can take tens of minutes. Do not spend an active developme
 - check CI at logical checkpoints and before merge
 - investigate failures; never weaken platform checks to shorten the wait
 - require Linux, Windows, and macOS release-build CI green for merge candidates
-- Rust dependency resolution is now reproducible through committed `src-tauri/Cargo.lock` and `--locked` test/check commands
+- Rust dependency resolution is reproducible through committed `src-tauri/Cargo.lock` and `--locked` test/check commands
+- frontend dependency resolution is reproducible through committed `package-lock.json` and `npm ci`
 
 An earlier session spent roughly twenty minutes waiting for CI, the stream disconnected, and a restarted instruction stream overlapped when the original later resumed. Inspect actual PR/branch/workflow state before continuing after an interruption.
 
@@ -234,7 +236,7 @@ Board drag/resize mutates DOM during pointer movement and persists geometry once
 
 The frontend remains Vanilla TypeScript. Do not add React/Vue/Svelte, a grid engine, or canvas dependency for current interactions.
 
-Cache hydration must not replace widget containers or reset pointer gestures; update only each widget's content node. The manual-refresh button is excluded from the drag-handle pointer path.
+Cache hydration must not replace widget containers or reset pointer gestures; update only each widget's content node. Manual-refresh and source-config controls are excluded from the drag-handle pointer path.
 
 ## Rust temporary-lifetime pitfall
 
@@ -254,7 +256,7 @@ The first real numeric baseline should be captured from the current release buil
 Canonical Linux command:
 
 ```bash
-npm install
+npm ci
 npm run tauri build
 ./src-tauri/target/release/dopagaki-board &
 APP_PID=$!
@@ -280,9 +282,9 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 ## Restart checklist
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Inspect Issue #28 and parent performance Issue #6.
-3. Treat GitHub state as authoritative after an interrupted or overlapping stream.
-4. For the simplification PR, require rustfmt, locked Rust tests/check, frontend build, and Tauri release build to pass on Linux/Windows/macOS.
-5. Merge the simplification slice only if behavior stays unchanged and the command/policy duplication is genuinely reduced.
-6. Capture the real release-build Idle baseline when a desktop session is available.
-7. After that checkpoint, choose the next adapter deliberately (likely YouTube or Wikipedia) using the existing scheduler/runtime/cache boundary rather than inventing another framework.
+2. Treat GitHub state as authoritative after an interrupted or overlapping stream; the product MVP checkpoint is PR #40 on `main`.
+3. Inspect parent performance Issue #6 and the maintenance stream (#38 merged; #39 superseded by clean PR #41) before starting new work.
+4. Capture the real release-build Idle baseline when a desktop session is available; do not infer or fabricate the missing pre-adapter numbers.
+5. Use the app on a real desktop at small, wide, and half-screen Board sizes and record concrete friction before broadening scope.
+6. Choose the next adapter deliberately (likely YouTube or Wikipedia) only after that checkpoint, reusing the established scheduler/runtime/cache/source-config boundaries.
+7. Keep Linux/Windows/macOS release-build CI green for every merge candidate.

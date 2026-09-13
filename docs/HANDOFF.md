@@ -12,23 +12,25 @@ Merged to `main`:
 - PR #16: configurable global shortcut + Rust-owned Idle badge
 - PR #17: Linux Idle performance baseline tooling
 - PR #18: independent Linux / Windows / macOS CI, each reaching a Tauri release build
+- PR #19: cache-first SQLite data layer + deterministic scheduler core
 
 Issue #3 is intentionally still open. Its code-side acceptance criteria are complete; the remaining item is a **real desktop Idle CPU/RSS baseline** recorded in `docs/PERF_BASELINE.md`.
 
-Active branch: `feat/cache-scheduler`.
-Active PR: #19.
-Current work: backend/data-layer slice of Issue #5.
+Active branch: `feat/cache-ui`.
+Active PR: #22.
+Current work: frontend/UI slice of Issue #20.
 
-PR #19 intentionally stops before frontend wiring and real HTTP adapters. It establishes:
+PR #22 is intentionally limited to cache-driven presentation and refresh settings:
 
-1. SQLite v3 cache + refresh-state schema
-2. one-time persistent demo cache so startup has useful data with networking unavailable
-3. refresh interval persistence (`OFF` or 5 min .. 24 h, default 1 h)
-4. a pure Rust scheduler core with deterministic tests for due times, deduplication, manual-priority upgrade, concurrency limit, and exponential backoff
-5. Tauri commands for cache reads/seen state and refresh settings
-6. architecture/handoff documentation
+1. Compact reads the top 1–3 persisted cache items instead of hard-coded prototype cards.
+2. Items presented in Compact are marked seen through `mark_cached_items_seen`, preserving Rust-owned `ShellStatus.has_unseen` as the source of truth.
+3. Board widgets hydrate from `list_cached_items_for_source(source_kind, source_config_json)` without rebuilding the whole Board when async cache reads finish.
+4. Identical Board source/config pairs share one cache read per hydration pass.
+5. External titles/authors/image URLs are assigned through DOM properties / `textContent`; they are not interpolated into `innerHTML`.
+6. Board gets an automatic-refresh popover backed by the existing settings commands. Position 0 is OFF; positions 1..100 map logarithmically from 5 minutes to 24 hours so short intervals get more slider space.
+7. No manual refresh button, HTTP adapter, runtime coordinator, or new frontend framework belongs in this PR.
 
-After #19 is green and merged, create a **new clean branch** for frontend cache-driven Compact/Board rendering and the refresh slider. After that, implement the event-driven runtime coordinator + first real source adapter. Do not hide HTTP/runtime work inside #19.
+After #22 is green and merged, continue with Issue #21: event/deadline-driven runtime coordination plus the first real arXiv adapter. Do not expand the pure scheduler spec instead of executing real background work.
 
 Issue #6 tracks the broader performance-budget/refactor discipline. Issue #15 tracks Cargo lockfile/cache/reproducibility work separately.
 
@@ -51,6 +53,7 @@ As of 2026-09-13, several old branches still exist because the connected GitHub 
 - `feat/idle-compact-shell`
 - `feat/shortcut-badge`
 - `perf/idle-baseline-tools`
+- `feat/cache-scheduler`
 
 Do not base new work on those branches.
 
@@ -116,7 +119,7 @@ Current invariants:
 - failures use exponential backoff, starting at 60 s and capped at 6 h
 - blocked sources are not started before their blocked-until boundary
 
-The runtime coordinator is not implemented in this first slice. When it is added, use event/deadline wakeups rather than frequent polling. Actual HTTP waits should use async I/O, not a permanently occupied OS thread.
+The runtime coordinator is not implemented yet. When it is added, use event/deadline wakeups rather than frequent polling. Actual HTTP waits should use async I/O, not a permanently occupied OS thread.
 
 ### Tauri command macro boundary
 
@@ -124,9 +127,17 @@ Keep `#[tauri::command]` functions registered from the module where the macro is
 
 ### Cache-first startup
 
-`lib.rs` opens/migrates SQLite and ensures the one-time cache seed before the frontend is usable. No network request is part of startup. Frontend wiring still needs to replace the current hard-coded Compact prototype with `list_cached_items` data.
+`lib.rs` opens/migrates SQLite and ensures the one-time cache seed before the frontend is usable. No network request is part of startup.
 
-When cache refresh later changes unseen state, preserve `ShellStatus` as the Rust-owned source of truth. Do not invent a second frontend unread/badge state.
+The cache/UI boundary introduced in PR #22 is intentionally narrow:
+
+- Compact invokes `list_cached_items` only when Compact is rendered.
+- Board invokes `list_cached_items_for_source` only for source/config pairs represented by current widgets.
+- cache results update the specific Compact feed or widget content nodes through DOM APIs
+- shell-status changes update only the relevant visible shell element; they must not cause a whole-Board rebuild because that can destroy an active drag/resize/settings interaction
+- current cached image fields are URLs, not locally stored image bytes, so offline startup must still remain useful from cached text if image fetches fail
+
+When runtime refresh later changes cache contents, preserve this narrow-update pattern rather than calling the top-level `render()` for every cache event.
 
 ## Idle baseline procedure
 
@@ -164,7 +175,7 @@ The default is `CmdOrCtrl+Shift+Space`. The underlying `global-hotkey` parser ac
 
 `ShellStatus` is orthogonal to `ViewState` and currently contains `has_unseen`, configured global shortcut, and active registration error. The frontend reflects it but is not the source of truth.
 
-Do not re-render the whole Board on future high-frequency shell/cache events; doing so can destroy an active drag/resize/settings interaction. Update only the relevant shell/content element when scheduler events become frequent.
+Do not re-render the whole Board on shell/cache events; doing so can destroy an active drag/resize/settings interaction. PR #22 changes the shell-status listener to update the Idle badge or active shortcut controls narrowly and leaves Board geometry/content DOM intact.
 
 ## Rust temporary-lifetime pitfall
 
@@ -182,6 +193,8 @@ Board drag/resize updates DOM during pointer movement and persists geometry once
 The frontend remains Vanilla TypeScript. Do not add React/Vue/Svelte, a grid engine, or canvas dependency for current interactions.
 
 Schema v2/v3 keeps `source_config_json` and `refresh_config_json`; use these unless a concrete adapter requirement justifies typed relational columns.
+
+Cached feed content must remain separate from geometry persistence. Hydrating content must not replace widget elements or reset pointer gestures; update only each widget's `[data-widget-content]` node.
 
 ## CI follow-up
 
@@ -206,8 +219,8 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 ## Restart checklist
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Inspect PR #19 plus Issues #3, #5, #6, and #15.
-3. If #19 is open, require Linux/Windows/macOS CI green and merge it as the backend/data-layer slice.
-4. Start frontend cache rendering + refresh slider from fresh `main` in a new branch.
-5. Then implement the event-driven coordinator and first real adapter rather than expanding the pure scheduler abstraction speculatively.
+2. Inspect PR #22 plus Issues #3, #5, #6, #15, #20, and #21.
+3. If #22 is open, require frontend build plus Linux/Windows/macOS Rust/Tauri CI green; fix failures rather than weakening checks.
+4. Merge #22 once green and close Issue #20 if its acceptance criteria remain satisfied.
+5. Start Issue #21 from fresh `main`: event/deadline coordinator + first arXiv adapter, keeping scheduler locks away from DB/HTTP I/O.
 6. Run the real release-build Idle baseline when a desktop session is available and record it in `docs/PERF_BASELINE.md`; close Issue #3 only then.

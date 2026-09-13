@@ -61,12 +61,9 @@ pub(crate) fn request_manual_for_widget(id: i64, state: &AppState) -> Result<(),
         }
 
         let key = SourceKey::new(widget.source_kind, widget.source_config_json)?;
-        let persisted = db::refresh_state::get(
-            &connection,
-            &key.source_kind,
-            &key.source_config_json,
-        )
-        .map_err(|error| format!("failed to read source refresh state: {error}"))?;
+        let persisted =
+            db::refresh_state::get(&connection, &key.source_kind, &key.source_config_json)
+                .map_err(|error| format!("failed to read source refresh state: {error}"))?;
         let global_interval = read_global_auto_interval(&connection)?;
         let auto_interval = sources::effective_auto_interval(&key.source_kind, global_interval);
         (key, persisted, auto_interval)
@@ -170,12 +167,9 @@ fn sync_scheduler_sources(app: &AppHandle, now: i64) -> Result<(), String> {
             if snapshots.contains_key(&key) {
                 continue;
             }
-            let persisted = db::refresh_state::get(
-                &connection,
-                &key.source_kind,
-                &key.source_config_json,
-            )
-            .map_err(|error| format!("failed to read source refresh state: {error}"))?;
+            let persisted =
+                db::refresh_state::get(&connection, &key.source_kind, &key.source_config_json)
+                    .map_err(|error| format!("failed to read source refresh state: {error}"))?;
             snapshots.insert(key, persisted);
         }
         (global_interval, snapshots)
@@ -201,10 +195,7 @@ fn sync_scheduler_sources(app: &AppHandle, now: i64) -> Result<(), String> {
     Ok(())
 }
 
-fn take_ready_work(
-    app: &AppHandle,
-    now: i64,
-) -> Result<(Vec<SourceKey>, Option<i64>), String> {
+fn take_ready_work(app: &AppHandle, now: i64) -> Result<(Vec<SourceKey>, Option<i64>), String> {
     let state = app.state::<AppState>();
     let mut scheduler = state
         .scheduler
@@ -231,7 +222,10 @@ async fn run_refresh(app: AppHandle, arxiv: Arc<ArxivClient>, key: SourceKey) {
     };
 
     if let Err(error) = persist_attempt(&app, &key, attempt_started) {
-        eprintln!("failed to persist refresh attempt for {}: {error}", key.source_kind);
+        eprintln!(
+            "failed to persist refresh attempt for {}: {error}",
+            key.source_kind
+        );
         finish_failure(&app, &key, &error);
         return;
     }
@@ -261,13 +255,8 @@ fn persist_attempt(app: &AppHandle, key: &SourceKey, now: i64) -> Result<(), Str
         .db
         .lock()
         .map_err(|_| "database lock was poisoned".to_owned())?;
-    db::refresh_state::mark_attempt(
-        &connection,
-        &key.source_kind,
-        &key.source_config_json,
-        now,
-    )
-    .map_err(|error| format!("failed to persist source attempt: {error}"))
+    db::refresh_state::mark_attempt(&connection, &key.source_kind, &key.source_config_json, now)
+        .map_err(|error| format!("failed to persist source attempt: {error}"))
 }
 
 fn finish_success(
@@ -389,8 +378,11 @@ fn matching_widget_ids(widgets: &[db::widgets::WidgetLayout], key: &SourceKey) -
     widgets
         .iter()
         .filter_map(|widget| {
-            let widget_key =
-                SourceKey::new(widget.source_kind.clone(), widget.source_config_json.clone()).ok()?;
+            let widget_key = SourceKey::new(
+                widget.source_kind.clone(),
+                widget.source_config_json.clone(),
+            )
+            .ok()?;
             (widget_key == *key).then_some(widget.id)
         })
         .collect()

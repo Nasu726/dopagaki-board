@@ -12,23 +12,25 @@ Merged to `main`:
 - PR #16: configurable global shortcut + Rust-owned Idle badge
 - PR #17: Linux Idle performance baseline tooling
 - PR #18: independent Linux / Windows / macOS CI, each reaching a Tauri release build
+- PR #19: cache-first data layer + deterministic scheduler core
 
-Issue #3 is intentionally still open. Its code-side acceptance criteria are complete; the remaining item is a **real desktop Idle CPU/RSS baseline** recorded in `docs/PERF_BASELINE.md`.
+Active branch: `feat-cache-ui`.
+Active PR: #23.
+Current work: frontend/cache slice of Issue #5.
 
-Active branch: `feat/cache-scheduler`.
-Active PR: #19.
-Current work: backend/data-layer slice of Issue #5.
+PR #23 is intentionally limited to presentation and existing local-cache commands. It:
 
-PR #19 intentionally stops before frontend wiring and real HTTP adapters. It establishes:
+1. replaces hard-coded Compact prototype cards with SQLite-backed cached items
+2. renders the matching cached item inside each Board widget using exact `(source_kind, source_config_json)` matching
+3. preserves one-click external navigation from Compact and Board
+4. marks actually surfaced cached items seen through the existing Rust-owned `ShellStatus` path
+5. avoids whole-Board re-rendering for badge-only shell-status changes
+6. adds the persisted automatic-refresh slider (`OFF` or 5 min .. 24 h, default 1 h), writing when the slider value is committed rather than on every pointer movement
+7. keeps startup/network behavior cache-first; no HTTP adapter or runtime coordinator is hidden in this PR
 
-1. SQLite v3 cache + refresh-state schema
-2. one-time persistent demo cache so startup has useful data with networking unavailable
-3. refresh interval persistence (`OFF` or 5 min .. 24 h, default 1 h)
-4. a pure Rust scheduler core with deterministic tests for due times, deduplication, manual-priority upgrade, concurrency limit, and exponential backoff
-5. Tauri commands for cache reads/seen state and refresh settings
-6. architecture/handoff documentation
+After #23 is green and merged, create a **new clean branch** for the event/deadline-driven runtime coordinator plus the first real source adapter. arXiv remains the preferred first adapter because it is text-centric and a useful proving ground for the adapter/cache/scheduler boundary.
 
-After #19 is green and merged, create a **new clean branch** for frontend cache-driven Compact/Board rendering and the refresh slider. After that, implement the event-driven runtime coordinator + first real source adapter. Do not hide HTTP/runtime work inside #19.
+Issue #3 is currently closed, but `docs/PERF_BASELINE.md` still records the real desktop CPU/RSS baseline as **pending**. Do not claim a measured Idle baseline until actual release-build numbers have been recorded there.
 
 Issue #6 tracks the broader performance-budget/refactor discipline. Issue #15 tracks Cargo lockfile/cache/reproducibility work separately.
 
@@ -51,6 +53,7 @@ As of 2026-09-13, several old branches still exist because the connected GitHub 
 - `feat/idle-compact-shell`
 - `feat/shortcut-badge`
 - `perf/idle-baseline-tools`
+- `feat/cache-scheduler`
 
 Do not base new work on those branches.
 
@@ -64,7 +67,7 @@ The workflows are deliberately separate rather than one matrix job:
 
 Each OS validates frontend production build, Rust tests/check, and `npm run tauri build -- --no-bundle --ci`. Linux additionally owns rustfmt and the Linux performance-helper syntax check.
 
-PR #18 finished green on all three platforms, including the Tauri release build.
+PR #18 finished green on all three platforms, including the Tauri release build. Feature PRs should continue to require all three workflows before merge.
 
 ### Windows icon incident
 
@@ -116,7 +119,9 @@ Current invariants:
 - failures use exponential backoff, starting at 60 s and capped at 6 h
 - blocked sources are not started before their blocked-until boundary
 
-The runtime coordinator is not implemented in this first slice. When it is added, use event/deadline wakeups rather than frequent polling. Actual HTTP waits should use async I/O, not a permanently occupied OS thread.
+The runtime coordinator is not implemented yet. When it is added, use event/deadline wakeups rather than frequent polling. Actual HTTP waits should use async I/O, not a permanently occupied OS thread.
+
+Do not hold the scheduler mutex across SQLite or HTTP work. Snapshot/pop scheduler decisions, release the scheduler lock, perform DB/network I/O, then reacquire only to commit the scheduling outcome.
 
 ### Tauri command macro boundary
 
@@ -124,9 +129,26 @@ Keep `#[tauri::command]` functions registered from the module where the macro is
 
 ### Cache-first startup
 
-`lib.rs` opens/migrates SQLite and ensures the one-time cache seed before the frontend is usable. No network request is part of startup. Frontend wiring still needs to replace the current hard-coded Compact prototype with `list_cached_items` data.
+`lib.rs` opens/migrates SQLite and ensures the one-time cache seed before the frontend is usable. No network request is part of startup.
+
+PR #23 reads view state, shell status, cached items, and refresh settings from local Rust commands during boot. Cache reads are also refreshed when Compact/Board is entered. Future networking must remain outside the startup critical path.
 
 When cache refresh later changes unseen state, preserve `ShellStatus` as the Rust-owned source of truth. Do not invent a second frontend unread/badge state.
+
+### Cache-driven frontend slice (PR #23)
+
+The frontend remains Vanilla TypeScript and now treats the SQLite cache as presentation input rather than embedding demo content in markup.
+
+- Compact renders at most the top three cached items returned by `list_cached_items`.
+- Board finds the first cached item whose `(source_kind, source_config_json)` exactly matches the widget. Newly created demo-era widgets currently use `{}` for `source_config_json`, so the persistent demo cache matches them.
+- Cached text inserted into generated markup must stay HTML-escaped. Source-kind class names are sanitized separately.
+- Compact and Board content remains the direct click target; no detail screen is introduced.
+- Items surfaced in Compact or Board are sent to `mark_cached_items_seen`. The command remains responsible for updating Rust-owned `has_unseen`.
+- A badge-only `shell-status-changed` event should update the Idle badge in place and must not rebuild an active Board tree. Shortcut-state changes may still require targeted UI refresh where the shortcut controls are visible.
+- The refresh slider uses five-minute UI steps from OFF through 24 h and calls `set_auto_refresh_interval` on committed `change`, not continuously during pointer movement.
+- Cached remote images are only rendered in Compact/Board. Idle still renders/decodes no content media.
+
+The current frontend has no `cache-changed` event because there is no runtime coordinator yet. When refreshes begin writing new items, prefer a targeted cache/content-change event and update only affected visible content. Do not respond to each background refresh by blindly re-rendering the whole Board.
 
 ## Idle baseline procedure
 
@@ -145,6 +167,8 @@ python3 scripts/measure_idle_linux.py --pid "$APP_PID" --settle 60 --duration 30
 Keep the app in Idle with no interaction during settle/sample. `docs/PERF_BASELINE.md` contains the full metric definitions and condition template.
 
 The Linux helper recursively samples the root process plus descendants so WebKit subprocesses are included. It reports conservative summed RSS and, where readable, process-tree PSS. It deliberately does not fake per-process network bytes from `/proc/<pid>/net/dev`, because that file is network-namespace scoped rather than PID-attributed.
+
+As of 2026-09-13, `docs/PERF_BASELINE.md` still says **real desktop measurement pending**. CI/dev measurements must not be substituted for it.
 
 ## Shortcut implementation and invariants
 
@@ -166,6 +190,8 @@ The default is `CmdOrCtrl+Shift+Space`. The underlying `global-hotkey` parser ac
 
 Do not re-render the whole Board on future high-frequency shell/cache events; doing so can destroy an active drag/resize/settings interaction. Update only the relevant shell/content element when scheduler events become frequent.
 
+PR #23 makes the first concrete change in this direction: badge-only shell-status events update Idle badge visibility directly rather than calling the global `render()` path.
+
 ## Rust temporary-lifetime pitfall
 
 Two PRs exposed the same family of `E0597` surprises:
@@ -182,6 +208,8 @@ Board drag/resize updates DOM during pointer movement and persists geometry once
 The frontend remains Vanilla TypeScript. Do not add React/Vue/Svelte, a grid engine, or canvas dependency for current interactions.
 
 Schema v2/v3 keeps `source_config_json` and `refresh_config_json`; use these unless a concrete adapter requirement justifies typed relational columns.
+
+Board content is now interactive. Keep drag bound to the dedicated drag handle so clicking cached content opens the original URL instead of beginning a drag.
 
 ## CI follow-up
 
@@ -206,8 +234,10 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 ## Restart checklist
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Inspect PR #19 plus Issues #3, #5, #6, and #15.
-3. If #19 is open, require Linux/Windows/macOS CI green and merge it as the backend/data-layer slice.
-4. Start frontend cache rendering + refresh slider from fresh `main` in a new branch.
-5. Then implement the event-driven coordinator and first real adapter rather than expanding the pure scheduler abstraction speculatively.
-6. Run the real release-build Idle baseline when a desktop session is available and record it in `docs/PERF_BASELINE.md`; close Issue #3 only then.
+2. Inspect PR #23 plus Issues #5, #6, and #15; also inspect `docs/PERF_BASELINE.md` before making claims about Issue #3's measurement status.
+3. If PR #23 is open, require Linux/Windows/macOS CI green and merge it as the frontend/cache slice of Issue #5.
+4. From fresh `main`, implement the event/deadline-driven runtime coordinator without holding scheduler locks across DB/network work.
+5. Add the first real source adapter, preferably arXiv, through the existing adapter/cache/scheduler boundary; canonicalize source config before relying on deduplication.
+6. Emit targeted cache/content changes rather than rebuilding the Board on every refresh.
+7. Run the real release-build Idle baseline when a desktop session is available and record it in `docs/PERF_BASELINE.md`.
+8. Continue Issue #15 lockfile/cache work separately from product feature PRs.

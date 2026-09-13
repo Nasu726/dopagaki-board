@@ -28,6 +28,7 @@ pub(crate) struct AppState {
     pub(crate) db: Mutex<Connection>,
     pub(crate) view: Mutex<ViewState>,
     pub(crate) shell: Mutex<ShellStatus>,
+    pub(crate) shortcut_change: Mutex<()>,
 }
 
 impl AppState {
@@ -36,6 +37,7 @@ impl AppState {
             db: Mutex::new(connection),
             view: Mutex::new(ViewState::default()),
             shell: Mutex::new(shell),
+            shortcut_change: Mutex::new(()),
         }
     }
 }

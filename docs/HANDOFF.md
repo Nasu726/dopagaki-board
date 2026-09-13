@@ -19,14 +19,15 @@ Merged to `main`:
 - PR #27: current `src-tauri/Cargo.lock` + `--locked` Rust CI on Linux/Windows/macOS
 - PR #34: first post-runtime deletion/simplification pass
 - PR #40: editable validated arXiv widget source settings + contextual Board editor
+- PR #38: committed frontend lockfile + `npm ci` across Linux/Windows/macOS CI
 
 Issue #5 (cache/scheduler), Issue #15 (Rust lockfile/reproducibility), Issue #21 (runtime/arXiv), Issue #28 (first simplification pass), and Issue #35 (editable arXiv widget source configuration) are complete.
 
 **Functional MVP checkpoint reached.** There is no active product feature branch. Idle / Compact / free-form Board, cached presentation, event-driven refresh, one real arXiv adapter, manual/automatic refresh, and contextual arXiv query/result-count editing are all on `main`, with Linux/Windows/macOS CI green on the merge candidate.
 
-This is a first-complete usability checkpoint, not a claim that product validation is finished. The next product-facing work should come from real desktop use: capture the pending Idle CPU/RSS baseline, inspect small/wide/half-screen behavior, and fix observed friction before adding adapters indiscriminately. Issue #7's formal Figma comparison sheet also remains open and is design validation/polish rather than a blocker for this MVP checkpoint.
+This is a first-complete usability checkpoint, not a claim that product validation is finished. The next product-facing work should come from real desktop use: capture the pending Idle CPU/RSS baseline, inspect small/wide/half-screen behavior, and fix observed friction before adding adapters indiscriminately. Figma comparison/mock work is intentionally deferred and is not required for the current direction; revisit it only if real-use feedback exposes a design problem that benefits from a visual exploration step.
 
-Independent maintenance work exists in PR #38 (npm lockfile / `npm ci`) and stacked PR #39 (measured Rust/npm CI caching). Keep maintenance changes separate from product behavior.
+Maintenance stream: PR #38 established `package-lock.json` + `npm ci`. The measured cache experiment from old stacked PR #39 was rebuilt cleanly as PR #41 after #38 merged; #39 is superseded. Keep maintenance changes separate from product behavior.
 
 Accidental duplicate Issues #29–#33 were created during tool setup and immediately closed as not planned.
 
@@ -46,7 +47,8 @@ Windows/macOS cold CI can take tens of minutes. Do not spend an active developme
 - check CI at logical checkpoints and before merge
 - investigate failures; never weaken platform checks to shorten the wait
 - require Linux, Windows, and macOS release-build CI green for merge candidates
-- Rust dependency resolution is now reproducible through committed `src-tauri/Cargo.lock` and `--locked` test/check commands
+- Rust dependency resolution is reproducible through committed `src-tauri/Cargo.lock` and `--locked` test/check commands
+- frontend dependency resolution is reproducible through committed `package-lock.json` and `npm ci`
 
 An earlier session spent roughly twenty minutes waiting for CI, the stream disconnected, and a restarted instruction stream overlapped when the original later resumed. Inspect actual PR/branch/workflow state before continuing after an interruption.
 
@@ -254,7 +256,7 @@ The first real numeric baseline should be captured from the current release buil
 Canonical Linux command:
 
 ```bash
-npm install
+npm ci
 npm run tauri build
 ./src-tauri/target/release/dopagaki-board &
 APP_PID=$!
@@ -281,7 +283,7 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
 2. Treat GitHub state as authoritative after an interrupted or overlapping stream; the product MVP checkpoint is PR #40 on `main`.
-3. Inspect parent performance Issue #6, design Issue #7, and the independent maintenance PRs #38/#39 before starting new work.
+3. Inspect parent performance Issue #6 and the maintenance stream (#38 merged; #39 superseded by clean PR #41) before starting new work.
 4. Capture the real release-build Idle baseline when a desktop session is available; do not infer or fabricate the missing pre-adapter numbers.
 5. Use the app on a real desktop at small, wide, and half-screen Board sizes and record concrete friction before broadening scope.
 6. Choose the next adapter deliberately (likely YouTube or Wikipedia) only after that checkpoint, reusing the established scheduler/runtime/cache/source-config boundaries.

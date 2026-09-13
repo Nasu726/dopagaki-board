@@ -1,16 +1,19 @@
 use crate::{
-    app::{self, AppState, ViewEvent, ViewState},
+    app::{self, AppState, ShellStatus, ViewEvent, ViewState, GLOBAL_SHORTCUT_SETTING_KEY},
     db::{self, widgets::WidgetLayout},
 };
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
 
 const MIN_WIDGET_WIDTH: f64 = 140.0;
 const MIN_WIDGET_HEIGHT: f64 = 96.0;
 const MAX_WIDGET_SIZE: f64 = 4096.0;
 const MAX_WIDGET_POSITION: f64 = 65_536.0;
+const MAX_SHORTCUT_LENGTH: usize = 128;
+const SHELL_STATUS_CHANGED_EVENT: &str = "shell-status-changed";
 const SOURCE_KINDS: &[&str] = &["youtube", "arxiv", "wikipedia", "nhk", "qiita", "zenn"];
 
 #[derive(Serialize)]
@@ -67,6 +70,95 @@ pub(crate) fn open_content(url: String, app: AppHandle) -> Result<ViewState, Str
         .map_err(|error| format!("failed to open content URL: {error}"))?;
 
     app::transition_view(&app, ViewEvent::ExternalLaunch)
+}
+
+#[tauri::command]
+pub(crate) fn get_shell_status(state: State<'_, AppState>) -> Result<ShellStatus, String> {
+    read_shell_status(&state)
+}
+
+#[tauri::command]
+pub(crate) fn set_unseen(
+    has_unseen: bool,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<ShellStatus, String> {
+    let next = {
+        let mut shell = state
+            .shell
+            .lock()
+            .map_err(|_| "shell status lock was poisoned".to_owned())?;
+        shell.has_unseen = has_unseen;
+        shell.clone()
+    };
+    publish_shell_status(&app, &next);
+    Ok(next)
+}
+
+#[tauri::command]
+pub(crate) fn set_global_shortcut(
+    shortcut: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<ShellStatus, String> {
+    let requested = normalize_shortcut(&shortcut)?;
+    let previous = read_shell_status(&state)?;
+    let shortcuts = app.global_shortcut();
+    let previous_registered = shortcuts.is_registered(previous.global_shortcut.as_str());
+
+    if requested == previous.global_shortcut {
+        if !previous_registered {
+            if let Err(error) = shortcuts.register(requested.as_str()) {
+                let message = format!("shortcut is unavailable: {error}");
+                let failed = update_shortcut_status(&state, requested, Some(message.clone()))?;
+                publish_shell_status(&app, &failed);
+                return Err(message);
+            }
+        }
+
+        persist_shortcut(&state, &requested)?;
+        let next = update_shortcut_status(&state, requested, None)?;
+        publish_shell_status(&app, &next);
+        return Ok(next);
+    }
+
+    shortcuts
+        .register(requested.as_str())
+        .map_err(|error| format!("shortcut is unavailable: {error}"))?;
+
+    if previous_registered {
+        if let Err(error) = shortcuts.unregister(previous.global_shortcut.as_str()) {
+            let rollback = shortcuts.unregister(requested.as_str()).err();
+            return Err(match rollback {
+                Some(rollback_error) => format!(
+                    "failed to replace the previous shortcut: {error}; cleanup also failed: {rollback_error}"
+                ),
+                None => format!("failed to replace the previous shortcut: {error}"),
+            });
+        }
+    }
+
+    if let Err(error) = persist_shortcut(&state, &requested) {
+        let remove_new_error = shortcuts.unregister(requested.as_str()).err();
+        let restore_old_error = if previous_registered {
+            shortcuts.register(previous.global_shortcut.as_str()).err()
+        } else {
+            None
+        };
+
+        let mut message = format!("failed to persist global shortcut: {error}");
+        if let Some(rollback_error) = remove_new_error {
+            message.push_str(&format!("; failed to remove new binding: {rollback_error}"));
+        }
+        if let Some(rollback_error) = restore_old_error {
+            message.push_str(&format!("; failed to restore previous binding: {rollback_error}"));
+        }
+        return Err(message);
+    }
+
+    let next = update_shortcut_status(&state, requested, None)?;
+    publish_shell_status(&app, &next);
+    Ok(next)
 }
 
 #[tauri::command]
@@ -144,6 +236,54 @@ pub(crate) fn delete_widget(id: i64, state: State<'_, AppState>) -> Result<(), S
     Ok(())
 }
 
+fn read_shell_status(state: &AppState) -> Result<ShellStatus, String> {
+    state
+        .shell
+        .lock()
+        .map(|shell| shell.clone())
+        .map_err(|_| "shell status lock was poisoned".to_owned())
+}
+
+fn update_shortcut_status(
+    state: &AppState,
+    global_shortcut: String,
+    global_shortcut_error: Option<String>,
+) -> Result<ShellStatus, String> {
+    let mut shell = state
+        .shell
+        .lock()
+        .map_err(|_| "shell status lock was poisoned".to_owned())?;
+    shell.global_shortcut = global_shortcut;
+    shell.global_shortcut_error = global_shortcut_error;
+    Ok(shell.clone())
+}
+
+fn persist_shortcut(state: &AppState, shortcut: &str) -> Result<(), String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "database lock was poisoned".to_owned())?;
+    db::set_setting(&connection, GLOBAL_SHORTCUT_SETTING_KEY, shortcut)
+        .map_err(|error| error.to_string())
+}
+
+fn publish_shell_status(app: &AppHandle, status: &ShellStatus) {
+    if let Err(error) = app.emit(SHELL_STATUS_CHANGED_EVENT, status.clone()) {
+        eprintln!("failed to emit shell status: {error}");
+    }
+}
+
+fn normalize_shortcut(shortcut: &str) -> Result<String, String> {
+    let shortcut = shortcut.trim();
+    if shortcut.is_empty() {
+        return Err("global shortcut cannot be empty".to_owned());
+    }
+    if shortcut.len() > MAX_SHORTCUT_LENGTH {
+        return Err("global shortcut is too long".to_owned());
+    }
+    Ok(shortcut.to_owned())
+}
+
 fn validate_source_kind(source_kind: &str) -> Result<(), String> {
     if SOURCE_KINDS.contains(&source_kind) {
         Ok(())
@@ -179,6 +319,13 @@ fn validate_size(width: f64, height: f64) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortcut_normalization_is_bounded_and_trimmed() {
+        assert_eq!(normalize_shortcut("  Ctrl+Shift+K  ").unwrap(), "Ctrl+Shift+K");
+        assert!(normalize_shortcut("   ").is_err());
+        assert!(normalize_shortcut(&"x".repeat(MAX_SHORTCUT_LENGTH + 1)).is_err());
+    }
 
     #[test]
     fn source_validation_is_explicit() {

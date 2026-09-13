@@ -16,8 +16,7 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
-                        if let Err(error) =
-                            app::transition_view(app, app::ViewEvent::GlobalToggle)
+                        if let Err(error) = app::transition_view(app, app::ViewEvent::GlobalToggle)
                         {
                             eprintln!("global shortcut transition failed: {error}");
                         }
@@ -34,9 +33,7 @@ pub fn run() {
             app.manage(app::AppState::new(connection));
 
             if let Err(error) = app.global_shortcut().register(DEFAULT_GLOBAL_SHORTCUT) {
-                eprintln!(
-                    "could not register global shortcut {DEFAULT_GLOBAL_SHORTCUT}: {error}"
-                );
+                eprintln!("could not register global shortcut {DEFAULT_GLOBAL_SHORTCUT}: {error}");
             }
 
             if let Err(error) = app::apply_current_view(app.handle()) {

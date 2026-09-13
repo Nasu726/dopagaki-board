@@ -3,7 +3,7 @@ pub(crate) mod cache_refresh;
 use crate::{
     app::{self, AppState, ShellStatus, ViewEvent, ViewState, GLOBAL_SHORTCUT_SETTING_KEY},
     db::{self, widgets::WidgetLayout},
-    runtime,
+    runtime, sources,
 };
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -148,6 +148,39 @@ pub(crate) fn add_widget(
     };
     runtime::wake(&state);
     Ok(widget)
+}
+
+#[tauri::command]
+pub(crate) fn update_widget_source_config(
+    id: i64,
+    source_config_json: String,
+    state: State<'_, AppState>,
+) -> Result<WidgetLayout, String> {
+    if id <= 0 {
+        return Err("widget id must be positive".to_owned());
+    }
+
+    let updated = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
+        let mut widget = db::widgets::get(&connection, id)
+            .map_err(|error| format!("failed to read widget: {error}"))?
+            .ok_or_else(|| "widget was not found".to_owned())?;
+        let normalized =
+            sources::normalize_editable_config(&widget.source_kind, &source_config_json)?;
+        let found = db::widgets::update_source_config(&connection, id, &normalized)
+            .map_err(|error| format!("failed to update widget source configuration: {error}"))?;
+        if !found {
+            return Err("widget was not found".to_owned());
+        }
+        widget.source_config_json = normalized;
+        widget
+    };
+
+    runtime::wake(&state);
+    Ok(updated)
 }
 
 #[tauri::command]

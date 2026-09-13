@@ -1,8 +1,12 @@
 mod app;
 mod commands;
 mod db;
+mod scheduler;
 
-use std::fs;
+use std::{
+    fs,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -28,13 +32,22 @@ pub fn run() {
 
             let db_path = app_data_dir.join("dopagaki-board.sqlite3");
             let connection = db::open(&db_path)?;
+            if db::get_setting(&connection, db::cache::DEMO_SEED_SETTING_KEY)?.is_none() {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
+                    .unwrap_or(0);
+                db::cache::seed_demo_items(&connection, now)?;
+                db::set_setting(&connection, db::cache::DEMO_SEED_SETTING_KEY, "1")?;
+            }
+
             let global_shortcut = db::get_setting(&connection, app::GLOBAL_SHORTCUT_SETTING_KEY)?
                 .unwrap_or_else(|| app::DEFAULT_GLOBAL_SHORTCUT.to_owned());
+            let has_unseen = db::cache::has_unseen(&connection)?;
+            let mut shell = app::ShellStatus::new(global_shortcut.clone(), None);
+            shell.has_unseen = has_unseen;
 
-            app.manage(app::AppState::new(
-                connection,
-                app::ShellStatus::new(global_shortcut.clone(), None),
-            ));
+            app.manage(app::AppState::new(connection, shell));
 
             if let Err(error) = app.global_shortcut().register(global_shortcut.as_str()) {
                 let message = format!("could not register {global_shortcut}: {error}");
@@ -65,6 +78,11 @@ pub fn run() {
             commands::add_widget,
             commands::update_widget_geometry,
             commands::delete_widget,
+            commands::cache_refresh::get_refresh_settings,
+            commands::cache_refresh::set_auto_refresh_interval,
+            commands::cache_refresh::list_cached_items,
+            commands::cache_refresh::list_cached_items_for_source,
+            commands::cache_refresh::mark_cached_items_seen,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run dopagaki-board");

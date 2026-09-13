@@ -39,14 +39,15 @@ src-tauri/src/
   db/
     mod.rs
     migrations.rs
+    cache.rs
   sources/
     mod.rs
-  scheduler/
-    mod.rs
+  scheduler.rs
   recommendation/
     mod.rs
   commands/
     mod.rs
+    cache_refresh.rs
   lib.rs
 ```
 
@@ -68,6 +69,8 @@ application start
 
 Network completion is never on the startup critical path.
 
+Schema v3 introduces `feed_items` and `source_refresh_state`. The initial implementation seeds a small persistent demo cache exactly once so the cache-first path can be exercised before real adapters exist. Demo data must not be reinserted on every launch after a user removes or replaces it.
+
 ## SQLite
 
 Use SQLite for modest local state and cached content.
@@ -84,14 +87,26 @@ Minimum data domains:
 
 Do not over-design schema/migrations before real adapters exist.
 
+`feed_items.payload_json` exists as an escape hatch for source-specific metadata while common fields stay queryable. Do not immediately normalize every future adapter field into columns.
+
 ## Scheduler model
 
 Use soft deadlines, not exact periodic polling.
 
-Per widget/source maintain state equivalent to:
+The scheduler core is intentionally independent from Tauri, SQLite, and HTTP. Its job is to make deterministic decisions about:
+
+- source/config deduplication
+- automatic due times
+- manual priority upgrades
+- bounded concurrency
+- retry blocking/backoff
+
+A source instance is identified by `(source_kind, canonical source_config_json)`, not by widget id. Multiple widgets depending on the same source instance must share one refresh job and fan the cached result out afterward.
+
+Per source maintain state equivalent to:
 
 - `next_due_at`
-- `refresh_due`
+- `refresh_due` / queued request
 - `refresh_running`
 - `last_attempt`
 - `last_success`
@@ -103,13 +118,17 @@ Priority order:
 
 `User interaction > Visible content > Manual refresh > Due auto refresh > Near-visible preload > Off-screen preload > maintenance`
 
-Start with 1–2 concurrent background network tasks. Never allow unbounded fan-out across widgets.
+Start with at most two concurrent background refresh jobs. Never allow unbounded fan-out across widgets. Manual refresh may upgrade an already queued automatic request instead of creating a duplicate.
+
+Failures use backoff rather than tight retry. A blocked source also blocks manual refresh until the hard retry boundary; later adapter policy can distinguish soft automatic backoff from hard API `Retry-After` if needed.
 
 ## Async behavior
 
 HTTP/RSS/API waits should use async I/O. Do not dedicate an OS thread merely to wait on network I/O.
 
 CPU-heavy work, if introduced later, may use worker threads where justified.
+
+The pure scheduler core does not imply an OS polling thread. The runtime coordinator should eventually sleep until the next relevant deadline or wake signal rather than poll frequently.
 
 ## Adapter contract direction
 
@@ -132,6 +151,8 @@ Use `ETag`, `If-Modified-Since`, and `304 Not Modified` where available.
 - Manual refresh remains available when OFF.
 - Normal maximum around 24 hours.
 - Source minimums may clamp the effective interval.
+
+Persist the global automatic interval in `settings` under `refresh.auto_interval_seconds`; `off` means disabled. Absence means the default one hour. Current accepted numeric range is 5 minutes through 24 hours.
 
 ## Thumbnail/media loading
 

@@ -6,21 +6,53 @@ Last updated: 2026-09-13
 
 ## Current checkpoint
 
-PR #12 (free-placement Board), PR #16 (configurable global shortcut + Rust-owned Idle badge), and PR #17 (Linux Idle performance baseline tooling) are merged to `main`.
+Merged to `main`:
+
+- PR #12: free-placement Board
+- PR #16: configurable global shortcut + Rust-owned Idle badge
+- PR #17: Linux Idle performance baseline tooling
+- PR #18: independent Linux / Windows / macOS CI, each reaching a Tauri release build
 
 Issue #3 is intentionally still open. Its code-side acceptance criteria are complete; the remaining item is a **real desktop Idle CPU/RSS baseline** recorded in `docs/PERF_BASELINE.md`.
 
-Active branch: `ci/cross-platform`.
-Active PR: #18.
-Current work:
+Active branch: `feat/cache-scheduler`.
+Active PR: #19.
+Current work: backend/data-layer slice of Issue #5.
 
-1. keep Linux validation as an independent workflow
-2. add independent Windows and macOS validation
-3. require frontend build + Rust tests/check + a real Tauri release build (`--no-bundle --ci`) on each OS
-4. merge only after all three platform workflows are green
-5. then return to the real release-build Idle baseline and Issue #5 scheduler work
+PR #19 intentionally stops before frontend wiring and real HTTP adapters. It establishes:
+
+1. SQLite v3 cache + refresh-state schema
+2. one-time persistent demo cache so startup has useful data with networking unavailable
+3. refresh interval persistence (`OFF` or 5 min .. 24 h, default 1 h)
+4. a pure Rust scheduler core with deterministic tests for due times, deduplication, manual-priority upgrade, concurrency limit, and exponential backoff
+5. Tauri commands for cache reads/seen state and refresh settings
+6. architecture/handoff documentation
+
+After #19 is green and merged, create a **new clean branch** for frontend cache-driven Compact/Board rendering and the refresh slider. After that, implement the event-driven runtime coordinator + first real source adapter. Do not hide HTTP/runtime work inside #19.
 
 Issue #6 tracks the broader performance-budget/refactor discipline. Issue #15 tracks Cargo lockfile/cache/reproducibility work separately.
+
+## Branch hygiene
+
+Keep the repository close to `main + one active feature branch` whenever practical.
+
+- after a feature PR is merged or superseded, delete its branch
+- do not keep stacked/temporary branches once their clean replacement exists
+- do not reuse an old feature branch for unrelated work
+- before creating a new branch, prefer branching from current `main`
+
+As of 2026-09-13, several old branches still exist because the connected GitHub tool currently exposes branch listing/update but not branch-ref deletion. They are obsolete and may be deleted safely once a deletion-capable path is available:
+
+- `ci/cross-platform`
+- `feat/bootstrap-tauri`
+- `feat/free-board`
+- `feat/free-board-clean`
+- `feat/idle-compact`
+- `feat/idle-compact-shell`
+- `feat/shortcut-badge`
+- `perf/idle-baseline-tools`
+
+Do not base new work on those branches.
 
 ## Cross-platform CI knowledge
 
@@ -30,40 +62,71 @@ The workflows are deliberately separate rather than one matrix job:
 - `.github/workflows/ci-windows.yml` -> `CI / Windows`
 - `.github/workflows/ci-macos.yml` -> `CI macOS`
 
-This makes a platform-specific failure independently visible and rerunnable.
+Each OS validates frontend production build, Rust tests/check, and `npm run tauri build -- --no-bundle --ci`. Linux additionally owns rustfmt and the Linux performance-helper syntax check.
 
-Each OS should validate:
-
-- frontend production build
-- Rust tests
-- `cargo check`
-- Tauri release application build with `npm run tauri build -- --no-bundle --ci`
-
-Linux additionally owns rustfmt and the syntax check for the Linux performance sampler.
-
-CI is compile/link/configuration validation, not a substitute for real GUI interaction tests. Packaging/signing is also intentionally separate from this check.
+PR #18 finished green on all three platforms, including the Tauri release build.
 
 ### Windows icon incident
 
-The first Windows run reached the Rust/Tauri build script and failed because `tauri-build` requires `src-tauri/icons/icon.ico` when generating Windows executable resources. Linux and macOS did not expose this requirement.
+The first Windows run failed because `tauri-build` requires `src-tauri/icons/icon.ico` when generating Windows executable resources. Linux/macOS did not expose the requirement.
 
 Repository policy:
 
 - canonical visual source remains `src-tauri/icons/icon.png`
 - `src-tauri/icons/icon.ico.b64` stores the equivalent Windows ICO in text form because the repository connector cannot reliably write binary blobs
 - `scripts/decode_windows_icon.ps1` materializes `src-tauri/icons/icon.ico`
-- Windows CI must run that helper **before any Cargo command**, because even `cargo test` executes `tauri-build`
+- Windows CI runs the helper before any Cargo command; even `cargo test` executes `tauri-build`
 - generated `src-tauri/icons/icon.ico` is ignored by Git
 
-For a fresh Windows checkout, run:
+For a fresh Windows checkout:
 
 ```powershell
 pwsh -File scripts/decode_windows_icon.ps1
 ```
 
-before invoking Cargo directly. The CI workflow performs this automatically.
+before direct Cargo commands.
 
-The first macOS cross-platform run passed frontend build, Rust tests/check, and the Tauri release build without platform-specific source changes.
+CI compile/link/configuration validation is not a substitute for real GUI interaction tests or signing/installer tests.
+
+## Cache/scheduler implementation knowledge
+
+### Schema v3
+
+`feed_items` stores common cache fields plus `payload_json` for source-specific metadata. `source_refresh_state` reserves persisted HTTP validator/backoff state (`last_attempt`, `last_success`, failure count, blocked-until, ETag, Last-Modified).
+
+Existing settings and Board layout survive v1/v2 -> v3 migration. Keep migration tests when the schema changes.
+
+The demo cache is seeded only once, guarded by `cache.demo_seeded_v1`. Do not reseed on every launch because deleted/replaced demo data must not reappear forever.
+
+### Scheduler core
+
+`src-tauri/src/scheduler.rs` is deliberately pure Rust: no Tauri, SQLite, HTTP, timers, or wall-clock calls inside decision logic.
+
+A source instance is keyed by `(source_kind, source_config_json)`, not widget id. Equivalent widget dependencies must deduplicate into one pending refresh.
+
+Current invariants:
+
+- default automatic interval: 1 hour
+- persisted setting key: `refresh.auto_interval_seconds`
+- persisted value `off` means automatic refresh disabled
+- allowed automatic interval: 5 minutes .. 24 hours
+- manual refresh remains possible with auto OFF
+- background concurrency starts at 2
+- manual request upgrades an already queued auto request instead of duplicating it
+- failures use exponential backoff, starting at 60 s and capped at 6 h
+- blocked sources are not started before their blocked-until boundary
+
+The runtime coordinator is not implemented in this first slice. When it is added, use event/deadline wakeups rather than frequent polling. Actual HTTP waits should use async I/O, not a permanently occupied OS thread.
+
+### Tauri command macro boundary
+
+Keep `#[tauri::command]` functions registered from the module where the macro is defined. Re-exporting those functions from `commands/mod.rs` and passing the re-exported path to `generate_handler!` caused the generated command marker symbols to be unresolved in PR #19. Use paths such as `commands::cache_refresh::get_refresh_settings` instead.
+
+### Cache-first startup
+
+`lib.rs` opens/migrates SQLite and ensures the one-time cache seed before the frontend is usable. No network request is part of startup. Frontend wiring still needs to replace the current hard-coded Compact prototype with `list_cached_items` data.
+
+When cache refresh later changes unseen state, preserve `ShellStatus` as the Rust-owned source of truth. Do not invent a second frontend unread/badge state.
 
 ## Idle baseline procedure
 
@@ -88,7 +151,6 @@ The Linux helper recursively samples the root process plus descendants so WebKit
 The default is `CmdOrCtrl+Shift+Space`. The underlying `global-hotkey` parser accepts `CmdOrCtrl` as a cross-platform alias.
 
 - persisted setting key: `shell.global_shortcut`
-- no schema migration; use the existing SQLite settings table
 - publish/manage `AppState` before OS shortcut registration so the plugin callback cannot observe missing managed state
 - serialize runtime shortcut changes with `AppState.shortcut_change`
 - replace bindings non-destructively: register new -> unregister old -> persist new
@@ -100,52 +162,32 @@ The default is `CmdOrCtrl+Shift+Space`. The underlying `global-hotkey` parser ac
 
 ## Shell status / unseen badge
 
-`ShellStatus` is intentionally orthogonal to `ViewState` and currently contains:
+`ShellStatus` is orthogonal to `ViewState` and currently contains `has_unseen`, configured global shortcut, and active registration error. The frontend reflects it but is not the source of truth.
 
-- `has_unseen: bool`
-- configured global shortcut
-- active shortcut registration error, if any
-
-The frontend reflects this state but is not its source of truth. When Issue #5 later changes `has_unseen` from background refreshes, update only the relevant visible shell element. Do not re-render the whole Board on every shell-status event because an active drag/resize/settings interaction could be destroyed.
-
-## Scheduler design already settled for Issue #5
-
-Do not equate widgets with network fetch jobs.
-
-Multiple widgets can depend on the same source/config. Separate:
-
-- widget state: desired freshness, visible priority, manual refresh request
-- source-instance state (source kind + canonical config): due/in-flight, validators, quota/backoff, last attempt/success
-- coordinator: priority, deduplication, bounded concurrency
-
-Equivalent source/config requests should fetch once and fan the normalized/cache result out to dependent widgets. On wake/resume after long sleep, collapse duplicate overdue work and stagger automatic refreshes rather than bursting all sources at once.
-
-A cross-platform OS "system idle" detector is not required for MVP. Soft deadlines, small concurrency, foreground priority, backoff, and interruptible preload provide the important non-interference behavior with much less complexity.
+Do not re-render the whole Board on future high-frequency shell/cache events; doing so can destroy an active drag/resize/settings interaction. Update only the relevant shell/content element when scheduler events become frequent.
 
 ## Rust temporary-lifetime pitfall
 
-Two PRs have exposed the same family of `E0597` surprises:
+Two PRs exposed the same family of `E0597` surprises:
 
-- PR #12: a tail `query_map(...).collect()` expression retained a temporary relative to the prepared statement
-- PR #16: a tail `match state.shell.lock() { ... }` retained the `Result<MutexGuard<...>>` temporary relative to the Tauri `State` binding
+- PR #12: tail `query_map(...).collect()` relative to a prepared statement
+- PR #16: tail `match state.shell.lock()` relative to Tauri `State`
 
-When a guard/iterator/borrow-producing expression at block tail triggers a surprising lifetime error, first make destruction order explicit with a local binding or a terminating semicolon. Do not immediately redesign ownership when explicit drop order is sufficient.
+When a guard/iterator/borrow-producing tail expression triggers a surprising lifetime error, first make destruction order explicit with a local binding or terminating semicolon. Do not redesign ownership unless necessary.
 
 ## Board implementation knowledge
 
-Board drag/resize updates the DOM during pointer movement and persists geometry only once at gesture end. Do not write SQLite on every pointer move.
+Board drag/resize updates DOM during pointer movement and persists geometry once at gesture end. Do not write SQLite on every pointer move.
 
-The frontend is intentionally Vanilla TypeScript. Do not add React/Vue/Svelte, a grid engine, or a canvas dependency merely for current Board interactions.
+The frontend remains Vanilla TypeScript. Do not add React/Vue/Svelte, a grid engine, or canvas dependency for current interactions.
 
-Schema v2 already reserves `source_config_json` and `refresh_config_json`. Use those when source adapters and refresh configuration arrive unless a concrete requirement justifies typed relational columns and another migration.
+Schema v2/v3 keeps `source_config_json` and `refresh_config_json`; use these unless a concrete adapter requirement justifies typed relational columns.
 
 ## CI follow-up
 
-Issue #15 tracks missing `Cargo.lock` and repeated Rust dependency resolution/build cost.
+Issue #15 tracks missing `Cargo.lock` and repeated Rust dependency resolution/build cost. Three independent OS workflows make cold-build cost more visible, but correctness was established without cache first so the current runs are useful before-values.
 
-Current cold CI repeatedly logs roughly 487 resolved Rust packages. First commit the executable's Cargo lockfile and use `--locked` for reproducibility; evaluate build caching separately so lockfile benefit and cache benefit are not conflated.
-
-Do not combine Issue #15 with platform correctness fixes unless a platform run directly proves the lockfile is required for correctness.
+First commit the executable lockfile and use `--locked`; evaluate build caching separately so dependency reproducibility and cache benefit are not conflated.
 
 ## Repository-memory protocol
 
@@ -164,9 +206,8 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 ## Restart checklist
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Inspect PR #18 plus Issues #3, #5, #6, and #15.
-3. If PR #18 is active, require Linux/Windows/macOS workflows to reach the Tauri release-build step and finish green; fix platform-specific failures rather than weakening the checks.
-4. Merge #18 once all three are green.
-5. Run the release-build Idle baseline on a real desktop and record results in `docs/PERF_BASELINE.md`.
-6. Close Issue #3 only after that measurement is committed.
-7. Then continue with Issue #5 unless another priority is explicitly chosen.
+2. Inspect PR #19 plus Issues #3, #5, #6, and #15.
+3. If #19 is open, require Linux/Windows/macOS CI green and merge it as the backend/data-layer slice.
+4. Start frontend cache rendering + refresh slider from fresh `main` in a new branch.
+5. Then implement the event-driven coordinator and first real adapter rather than expanding the pure scheduler abstraction speculatively.
+6. Run the real release-build Idle baseline when a desktop session is available and record it in `docs/PERF_BASELINE.md`; close Issue #3 only then.

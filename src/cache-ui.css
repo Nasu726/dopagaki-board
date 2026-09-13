@@ -173,6 +173,33 @@
   text-align: center;
 }
 
+.board-widget__refresh {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: #89929f;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.board-widget:hover .board-widget__refresh,
+.board-widget:focus-within .board-widget__refresh {
+  opacity: 1;
+}
+
+.board-widget__refresh:hover {
+  color: #46556b;
+  background: #edf1f6;
+}
+
+.board-widget__refresh:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
 .refresh-popover {
   position: absolute;
   z-index: 200;

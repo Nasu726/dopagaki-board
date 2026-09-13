@@ -1,8 +1,10 @@
 mod app;
 mod commands;
 mod db;
+mod runtime;
 mod scheduler;
 mod source_config;
+mod sources;
 
 use std::{
     fs,
@@ -65,6 +67,10 @@ pub fn run() {
                 eprintln!("failed to apply initial view state: {error}");
             }
 
+            if let Err(error) = runtime::start(app.handle().clone()) {
+                eprintln!("background refresh runtime is unavailable: {error}");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -79,6 +85,7 @@ pub fn run() {
             commands::add_widget,
             commands::update_widget_geometry,
             commands::delete_widget,
+            commands::refresh_widget,
             commands::cache_refresh::get_refresh_settings,
             commands::cache_refresh::set_auto_refresh_interval,
             commands::cache_refresh::list_cached_items,

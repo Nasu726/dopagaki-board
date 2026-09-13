@@ -3,6 +3,7 @@ pub(crate) mod cache_refresh;
 use crate::{
     app::{self, AppState, ShellStatus, ViewEvent, ViewState, GLOBAL_SHORTCUT_SETTING_KEY},
     db::{self, widgets::WidgetLayout},
+    runtime,
 };
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -190,12 +191,16 @@ pub(crate) fn add_widget(
     validate_position(x, y)?;
     validate_size(width, height)?;
 
-    let connection = state
-        .db
-        .lock()
-        .map_err(|_| "database lock was poisoned".to_owned())?;
-    db::widgets::create(&connection, &source_kind, x, y, width, height)
-        .map_err(|error| format!("failed to create widget: {error}"))
+    let widget = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
+        db::widgets::create(&connection, &source_kind, x, y, width, height)
+            .map_err(|error| format!("failed to create widget: {error}"))?
+    };
+    runtime::wake(&state);
+    Ok(widget)
 }
 
 #[tauri::command]
@@ -231,16 +236,24 @@ pub(crate) fn delete_widget(id: i64, state: State<'_, AppState>) -> Result<(), S
         return Err("widget id must be positive".to_owned());
     }
 
-    let connection = state
-        .db
-        .lock()
-        .map_err(|_| "database lock was poisoned".to_owned())?;
-    let found = db::widgets::delete(&connection, id)
-        .map_err(|error| format!("failed to delete widget: {error}"))?;
-    if !found {
-        return Err("widget was not found".to_owned());
+    {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
+        let found = db::widgets::delete(&connection, id)
+            .map_err(|error| format!("failed to delete widget: {error}"))?;
+        if !found {
+            return Err("widget was not found".to_owned());
+        }
     }
+    runtime::wake(&state);
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn refresh_widget(id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    runtime::request_manual_for_widget(id, &state)
 }
 
 fn read_shell_status(state: &AppState) -> Result<ShellStatus, String> {

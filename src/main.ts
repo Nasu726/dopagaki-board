@@ -42,6 +42,12 @@ type RefreshSettings = {
   autoIntervalSeconds: number | null;
 };
 
+type CacheChanged = {
+  sourceKind: string;
+  sourceConfigJson: string;
+  widgetIds: number[];
+};
+
 type Point = { x: number; y: number };
 
 type SourceGroup = {
@@ -167,14 +173,16 @@ function renderCompact(): void {
   void loadCompactItems();
 }
 
-async function loadCompactItems(): Promise<void> {
+async function loadCompactItems(showLoading = true): Promise<void> {
   const feed = document.querySelector<HTMLElement>(".compact-feed");
   if (!feed) {
     return;
   }
 
-  feed.setAttribute("aria-busy", "true");
-  feed.replaceChildren(createStatusElement("Loading cached content…"));
+  if (showLoading) {
+    feed.setAttribute("aria-busy", "true");
+    feed.replaceChildren(createStatusElement("Loading cached content…"));
+  }
 
   try {
     const items = await invoke<CachedItem[]>("list_cached_items", { limit: COMPACT_CACHE_LIMIT });
@@ -193,7 +201,7 @@ async function loadCompactItems(): Promise<void> {
       applyShellStatusToVisibleUi(previous);
     }
   } catch (error) {
-    if (currentView === "compact" && feed.isConnected) {
+    if (currentView === "compact" && feed.isConnected && showLoading) {
       feed.dataset.count = "0";
       feed.removeAttribute("aria-busy");
       feed.replaceChildren(createStatusElement("Cached content is unavailable."));
@@ -344,6 +352,10 @@ function renderBoard(): void {
 
 function renderWidgetMarkup(widget: WidgetLayout): string {
   const label = sourceLabel(widget.sourceKind);
+  const refreshButton =
+    widget.sourceKind === "arxiv"
+      ? `<button class="board-widget__refresh" data-refresh-widget type="button" aria-label="Refresh ${label}" title="Refresh now">↻</button>`
+      : "";
   return `
     <article
       class="board-widget board-widget--${widget.sourceKind}"
@@ -352,6 +364,7 @@ function renderWidgetMarkup(widget: WidgetLayout): string {
     >
       <div class="board-widget__drag" data-drag-handle>
         <span>${label}</span>
+        ${refreshButton}
         <button class="board-widget__delete" data-delete-widget type="button" aria-label="Delete ${label}">×</button>
       </div>
       <div class="board-widget__content" data-widget-content aria-label="${label} cached content">
@@ -382,41 +395,41 @@ async function hydrateBoardWidgets(generation: number): Promise<void> {
     }
   }
 
-  await Promise.all(
-    [...groups.values()].map(async (group) => {
-      try {
-        const items = await invoke<CachedItem[]>("list_cached_items_for_source", {
-          sourceKind: group.sourceKind,
-          sourceConfigJson: group.sourceConfigJson,
-          limit: BOARD_CACHE_LIMIT,
-        });
-        if (currentView !== "board" || generation !== boardHydrationGeneration) {
-          return;
-        }
+  await Promise.all([...groups.values()].map((group) => hydrateBoardSource(group, generation)));
+}
 
-        for (const widgetId of group.widgetIds) {
-          const container = document.querySelector<HTMLElement>(
-            `[data-widget-id="${widgetId}"] [data-widget-content]`,
-          );
-          if (container?.isConnected) {
-            renderBoardCachedItems(container, items, group.sourceKind);
-          }
-        }
-      } catch (error) {
-        if (currentView === "board" && generation === boardHydrationGeneration) {
-          for (const widgetId of group.widgetIds) {
-            const container = document.querySelector<HTMLElement>(
-              `[data-widget-id="${widgetId}"] [data-widget-content]`,
-            );
-            if (container?.isConnected) {
-              container.replaceChildren(createBoardEmpty("Cache unavailable"));
-            }
-          }
-        }
-        console.error(`failed to hydrate ${group.sourceKind} widget cache`, error);
+async function hydrateBoardSource(group: SourceGroup, generation: number): Promise<void> {
+  try {
+    const items = await invoke<CachedItem[]>("list_cached_items_for_source", {
+      sourceKind: group.sourceKind,
+      sourceConfigJson: group.sourceConfigJson,
+      limit: BOARD_CACHE_LIMIT,
+    });
+    if (currentView !== "board" || generation !== boardHydrationGeneration) {
+      return;
+    }
+
+    for (const widgetId of group.widgetIds) {
+      const container = document.querySelector<HTMLElement>(
+        `[data-widget-id="${widgetId}"] [data-widget-content]`,
+      );
+      if (container?.isConnected) {
+        renderBoardCachedItems(container, items, group.sourceKind);
       }
-    }),
-  );
+    }
+  } catch (error) {
+    if (currentView === "board" && generation === boardHydrationGeneration) {
+      for (const widgetId of group.widgetIds) {
+        const container = document.querySelector<HTMLElement>(
+          `[data-widget-id="${widgetId}"] [data-widget-content]`,
+        );
+        if (container?.isConnected) {
+          container.replaceChildren(createBoardEmpty("Cache unavailable"));
+        }
+      }
+    }
+    console.error(`failed to hydrate ${group.sourceKind} widget cache`, error);
+  }
 }
 
 function renderBoardCachedItems(
@@ -739,7 +752,7 @@ function bindWidgetInteractions(): void {
     }
 
     element.querySelector<HTMLElement>("[data-drag-handle]")?.addEventListener("pointerdown", (event) => {
-      if ((event.target as HTMLElement).closest("[data-delete-widget]")) {
+      if ((event.target as HTMLElement).closest("[data-delete-widget], [data-refresh-widget]")) {
         return;
       }
       startDrag(event, element, id);
@@ -753,6 +766,24 @@ function bindWidgetInteractions(): void {
       event.stopPropagation();
       void removeBoardWidget(id);
     });
+
+    element.querySelector<HTMLButtonElement>("[data-refresh-widget]")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void refreshBoardWidget(id, event.currentTarget as HTMLButtonElement);
+    });
+  }
+}
+
+async function refreshBoardWidget(id: number, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  try {
+    await invoke("refresh_widget", { id });
+  } catch (error) {
+    console.error("failed to request widget refresh", error);
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+    }
   }
 }
 
@@ -968,6 +999,34 @@ function applyShellStatusToVisibleUi(previous: ShellStatus): void {
   }
 }
 
+async function applyCacheChangeToVisibleUi(change: CacheChanged): Promise<void> {
+  if (currentView === "compact") {
+    await loadCompactItems(false);
+    return;
+  }
+
+  if (currentView !== "board" || change.widgetIds.length === 0) {
+    return;
+  }
+
+  const generation = boardHydrationGeneration;
+  const activeWidgetIds = change.widgetIds.filter((id) =>
+    boardWidgets.some((widget) => widget.id === id),
+  );
+  if (activeWidgetIds.length === 0) {
+    return;
+  }
+
+  await hydrateBoardSource(
+    {
+      sourceKind: change.sourceKind,
+      sourceConfigJson: change.sourceConfigJson,
+      widgetIds: activeWidgetIds,
+    },
+    generation,
+  );
+}
+
 async function boot(): Promise<void> {
   await listen<ViewState>("view-state-changed", (event) => {
     currentView = event.payload;
@@ -978,6 +1037,10 @@ async function boot(): Promise<void> {
     const previous = shellStatus;
     shellStatus = event.payload;
     applyShellStatusToVisibleUi(previous);
+  });
+
+  await listen<CacheChanged>("cache-changed", (event) => {
+    void applyCacheChangeToVisibleUi(event.payload);
   });
 
   try {

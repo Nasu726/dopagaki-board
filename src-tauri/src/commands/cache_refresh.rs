@@ -2,11 +2,11 @@ use super::publish_shell_status;
 use crate::{
     app::{AppState, ShellStatus},
     db::{self, cache::CachedItem},
-    scheduler::{SourceKey, AUTO_REFRESH_SETTING_KEY, DEFAULT_AUTO_REFRESH_SECONDS},
+    runtime,
+    scheduler::{AUTO_REFRESH_SETTING_KEY, DEFAULT_AUTO_REFRESH_SECONDS},
     source_config,
 };
 use serde::Serialize;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, State};
 
 const MIN_AUTO_REFRESH_SECONDS: u64 = 5 * 60;
@@ -39,34 +39,19 @@ pub(crate) fn set_auto_refresh_interval(
 ) -> Result<RefreshSettings, String> {
     validate_auto_interval(auto_interval_seconds)?;
 
-    let source_keys = {
+    {
         let connection = state
             .db
             .lock()
             .map_err(|_| "database lock was poisoned".to_owned())?;
-        let source_keys = db::widgets::list(&connection)
-            .map_err(|error| format!("failed to list widget sources: {error}"))?
-            .into_iter()
-            .map(|widget| SourceKey::new(widget.source_kind, widget.source_config_json))
-            .collect::<Result<Vec<_>, _>>()?;
-
         let value = auto_interval_seconds
             .map(|seconds| seconds.to_string())
             .unwrap_or_else(|| "off".to_owned());
         db::set_setting(&connection, AUTO_REFRESH_SETTING_KEY, &value)
             .map_err(|error| format!("failed to persist refresh interval: {error}"))?;
-        source_keys
-    };
-
-    let now = unix_seconds()?;
-    let mut scheduler = state
-        .scheduler
-        .lock()
-        .map_err(|_| "scheduler lock was poisoned".to_owned())?;
-    for key in source_keys {
-        scheduler.sync_source(key, now, auto_interval_seconds);
     }
 
+    runtime::wake(&state);
     Ok(RefreshSettings {
         auto_interval_seconds,
     })
@@ -176,13 +161,6 @@ fn validate_cache_limit(limit: usize) -> Result<usize, String> {
     } else {
         Err("cache item limit is outside the supported range".to_owned())
     }
-}
-
-fn unix_seconds() -> Result<i64, String> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| format!("system clock error: {error}"))
-        .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
 }
 
 #[cfg(test)]

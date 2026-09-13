@@ -1,5 +1,5 @@
 use crate::source_config;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) const AUTO_REFRESH_SETTING_KEY: &str = "refresh.auto_interval_seconds";
 pub(crate) const DEFAULT_AUTO_REFRESH_SECONDS: u64 = 60 * 60;
@@ -51,6 +51,31 @@ impl SourceSchedule {
             running: false,
             failure_count: 0,
             blocked_until: None,
+        }
+    }
+
+    fn restored(
+        now: i64,
+        auto_interval_seconds: Option<u64>,
+        last_success: Option<i64>,
+        failure_count: u32,
+        blocked_until: Option<i64>,
+    ) -> Self {
+        let next_due_at = auto_interval_seconds.map(|seconds| {
+            if let Some(blocked) = blocked_until.filter(|blocked| *blocked > now) {
+                blocked
+            } else if let Some(success) = last_success {
+                add_seconds(success, seconds)
+            } else {
+                now
+            }
+        });
+        Self {
+            auto_interval_seconds,
+            next_due_at,
+            running: false,
+            failure_count,
+            blocked_until,
         }
     }
 }
@@ -109,6 +134,42 @@ impl Scheduler {
             None => {
                 self.sources
                     .insert(key, SourceSchedule::new(now, auto_interval_seconds));
+            }
+        }
+    }
+
+    pub(crate) fn sync_source_with_persisted_state(
+        &mut self,
+        key: SourceKey,
+        now: i64,
+        auto_interval_seconds: Option<u64>,
+        last_success: Option<i64>,
+        failure_count: u32,
+        blocked_until: Option<i64>,
+    ) {
+        if self.sources.contains_key(&key) {
+            self.sync_source(key, now, auto_interval_seconds);
+            return;
+        }
+
+        self.sources.insert(
+            key,
+            SourceSchedule::restored(
+                now,
+                auto_interval_seconds,
+                last_success,
+                failure_count,
+                blocked_until,
+            ),
+        );
+    }
+
+    pub(crate) fn disable_missing_sources(&mut self, active: &HashSet<SourceKey>) {
+        self.pending.retain(|request| active.contains(&request.key));
+        for (key, state) in &mut self.sources {
+            if !active.contains(key) {
+                state.auto_interval_seconds = None;
+                state.next_due_at = None;
             }
         }
     }
@@ -173,6 +234,34 @@ impl Scheduler {
         Some(request.key)
     }
 
+    pub(crate) fn next_wakeup_at(&self, now: i64) -> Option<i64> {
+        if self.running_count >= self.max_concurrent {
+            return None;
+        }
+
+        let pending_deadline = self.pending.iter().filter_map(|request| {
+            let state = self.sources.get(&request.key)?;
+            if state.running {
+                return None;
+            }
+            Some(
+                state
+                    .blocked_until
+                    .filter(|blocked| *blocked > now)
+                    .unwrap_or(now),
+            )
+        });
+
+        let automatic_deadline = self.sources.values().filter_map(|state| {
+            if state.running || state.auto_interval_seconds.is_none() {
+                return None;
+            }
+            state.next_due_at
+        });
+
+        pending_deadline.chain(automatic_deadline).min()
+    }
+
     pub(crate) fn complete_success(&mut self, key: &SourceKey, now: i64) {
         let Some(state) = self.sources.get_mut(key) else {
             return;
@@ -201,6 +290,12 @@ impl Scheduler {
         let retry_at = now.saturating_add(delay);
         state.blocked_until = Some(retry_at);
         state.next_due_at = state.auto_interval_seconds.map(|_| retry_at);
+    }
+
+    pub(crate) fn failure_state(&self, key: &SourceKey) -> Option<(u32, Option<i64>)> {
+        self.sources
+            .get(key)
+            .map(|state| (state.failure_count, state.blocked_until))
     }
 
     #[cfg(test)]
@@ -285,6 +380,40 @@ mod tests {
     }
 
     #[test]
+    fn restored_never_refreshed_source_is_due_immediately_after_startup() {
+        let mut scheduler = Scheduler::new(1);
+        let source = key("arxiv");
+        scheduler.sync_source_with_persisted_state(
+            source.clone(),
+            100,
+            Some(86_400),
+            None,
+            0,
+            None,
+        );
+        scheduler.mark_due(100);
+        assert_eq!(scheduler.pop_ready(100), Some(source));
+    }
+
+    #[test]
+    fn restored_success_uses_persisted_deadline() {
+        let mut scheduler = Scheduler::new(1);
+        let source = key("arxiv");
+        scheduler.sync_source_with_persisted_state(
+            source.clone(),
+            100,
+            Some(60),
+            Some(80),
+            0,
+            None,
+        );
+        scheduler.mark_due(139);
+        assert_eq!(scheduler.pop_ready(139), None);
+        scheduler.mark_due(140);
+        assert_eq!(scheduler.pop_ready(140), Some(source));
+    }
+
+    #[test]
     fn off_disables_auto_but_manual_refresh_still_runs() {
         let mut scheduler = Scheduler::new(1);
         let source = key("wikipedia");
@@ -312,6 +441,21 @@ mod tests {
         scheduler.sync_source(source.clone(), 11, Some(60));
         assert_eq!(scheduler.queued_count(), 1);
         assert_eq!(scheduler.pop_ready(11), Some(source));
+    }
+
+    #[test]
+    fn missing_source_is_disabled_without_releasing_running_slot_early() {
+        let mut scheduler = Scheduler::new(1);
+        let source = key("arxiv");
+        scheduler.request_manual(source.clone(), 0);
+        assert_eq!(scheduler.pop_ready(0), Some(source.clone()));
+
+        scheduler.disable_missing_sources(&HashSet::new());
+        assert_eq!(scheduler.running_count(), 1);
+        scheduler.complete_success(&source, 1);
+        assert_eq!(scheduler.running_count(), 0);
+        scheduler.mark_due(1_000_000);
+        assert_eq!(scheduler.pop_ready(1_000_000), None);
     }
 
     #[test]
@@ -344,6 +488,17 @@ mod tests {
 
         scheduler.complete_success(&first, 1);
         assert!(scheduler.pop_ready(1).is_some());
+    }
+
+    #[test]
+    fn blocked_pending_request_exposes_next_wakeup_deadline() {
+        let mut scheduler = Scheduler::new(1);
+        let source = key("nhk");
+        scheduler.request_manual(source.clone(), 0);
+        assert_eq!(scheduler.pop_ready(0), Some(source.clone()));
+        scheduler.complete_failure(&source, 10);
+        scheduler.request_manual(source, 11);
+        assert_eq!(scheduler.next_wakeup_at(11), Some(70));
     }
 
     #[test]

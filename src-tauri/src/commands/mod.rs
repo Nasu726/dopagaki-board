@@ -46,10 +46,7 @@ pub(crate) fn get_view_state(app: AppHandle) -> Result<ViewState, String> {
 }
 
 #[tauri::command]
-pub(crate) fn transition_view(
-    event: ViewEvent,
-    app: AppHandle,
-) -> Result<ViewState, String> {
+pub(crate) fn transition_view(event: ViewEvent, app: AppHandle) -> Result<ViewState, String> {
     app::transition_view(&app, event)
 }
 

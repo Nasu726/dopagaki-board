@@ -1,6 +1,7 @@
 mod app;
 mod commands;
 mod db;
+mod refresh_settings;
 mod runtime;
 mod scheduler;
 mod source_config;
@@ -74,13 +75,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::bootstrap_probe,
             commands::get_view_state,
             commands::transition_view,
             commands::open_content,
             commands::get_shell_status,
             commands::set_global_shortcut,
-            commands::set_unseen,
             commands::list_widgets,
             commands::add_widget,
             commands::update_widget_geometry,

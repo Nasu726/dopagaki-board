@@ -82,7 +82,8 @@ pub(crate) fn list_top(connection: &Connection, limit: usize) -> Result<Vec<Cach
     )?;
 
     let rows = statement.query_map([limit], map_item)?;
-    rows.collect()
+    let items = rows.collect();
+    items
 }
 
 pub(crate) fn list_for_source(
@@ -97,7 +98,8 @@ pub(crate) fn list_for_source(
     )?;
 
     let rows = statement.query_map(params![source_kind, source_config_json, limit], map_item)?;
-    rows.collect()
+    let items = rows.collect();
+    items
 }
 
 pub(crate) fn mark_seen(connection: &Connection, ids: &[String]) -> Result<usize> {

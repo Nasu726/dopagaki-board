@@ -1,3 +1,10 @@
+mod cache_refresh;
+
+pub(crate) use cache_refresh::{
+    get_refresh_settings, list_cached_items, list_cached_items_for_source, mark_cached_items_seen,
+    set_auto_refresh_interval,
+};
+
 use crate::{
     app::{self, AppState, ShellStatus, ViewEvent, ViewState, GLOBAL_SHORTCUT_SETTING_KEY},
     db::{self, widgets::WidgetLayout},

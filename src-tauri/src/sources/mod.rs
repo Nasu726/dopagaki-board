@@ -43,11 +43,7 @@ mod tests {
     #[test]
     fn arxiv_source_identity_uses_semantic_normalization() {
         assert_eq!(
-            normalize_config(
-                "arxiv",
-                r#"{ "maxResults": 12, "query": "cat:cs.AI" }"#
-            )
-            .unwrap(),
+            normalize_config("arxiv", r#"{ "maxResults": 12, "query": "cat:cs.AI" }"#).unwrap(),
             "{}"
         );
         assert_eq!(

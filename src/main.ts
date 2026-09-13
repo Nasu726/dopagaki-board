@@ -23,6 +23,24 @@ type WidgetLayout = {
   displayMode: string;
 };
 
+type CachedItem = {
+  id: string;
+  sourceKind: string;
+  sourceConfigJson: string;
+  externalUrl: string;
+  title: string | null;
+  imageUrl: string | null;
+  author: string | null;
+  publishedAt: number | null;
+  fetchedAt: number;
+  score: number;
+  isUnseen: boolean;
+};
+
+type RefreshSettings = {
+  autoIntervalSeconds: number | null;
+};
+
 type Point = { x: number; y: number };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -39,6 +57,11 @@ const DEFAULT_WIDGET_HEIGHT = 180;
 const MIN_WIDGET_WIDTH = 140;
 const MIN_WIDGET_HEIGHT = 96;
 const DEFAULT_GLOBAL_SHORTCUT = "CmdOrCtrl+Shift+Space";
+const DEFAULT_AUTO_REFRESH_SECONDS = 60 * 60;
+const REFRESH_STEP_SECONDS = 5 * 60;
+const MAX_REFRESH_STEPS = (24 * 60 * 60) / REFRESH_STEP_SECONDS;
+const CACHE_LIMIT = 100;
+const COMPACT_ITEM_LIMIT = 3;
 
 function getAppRoot(): HTMLElement {
   const element = document.querySelector<HTMLElement>("#app");
@@ -55,11 +78,18 @@ let shellStatus: ShellStatus = {
   globalShortcut: DEFAULT_GLOBAL_SHORTCUT,
   globalShortcutError: null,
 };
+let refreshSettings: RefreshSettings = {
+  autoIntervalSeconds: DEFAULT_AUTO_REFRESH_SECONDS,
+};
+let cachedItems: CachedItem[] = [];
+let cacheLoadPromise: Promise<void> | null = null;
 let boardWidgets: WidgetLayout[] = [];
 let boardLoaded = false;
 let addPoint: Point | null = null;
 let shortcutPopoverOpen = false;
 let shortcutFormError: string | null = null;
+let refreshPopoverOpen = false;
+let refreshFormError: string | null = null;
 
 function render(): void {
   document.documentElement.dataset.view = currentView;
@@ -99,6 +129,11 @@ function renderCompact(): void {
   const shortcutWarning = shellStatus.globalShortcutError
     ? `<button class="shortcut-warning" data-action="shortcut-settings" type="button">Shortcut unavailable</button>`
     : "";
+  const items = cachedItems.slice(0, COMPACT_ITEM_LIMIT);
+  const countClass = `compact-feed--count-${Math.max(1, items.length)}`;
+  const feedMarkup = items.length > 0
+    ? items.map(renderCompactItemMarkup).join("")
+    : `<div class="compact-empty">No cached discoveries yet.</div>`;
 
   root.innerHTML = `
     <main class="compact-shell" aria-label="Quick discovery">
@@ -110,30 +145,22 @@ function renderCompact(): void {
         <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle">×</button>
       </header>
 
-      <section class="compact-feed" aria-label="Prototype content">
-        <button class="content-card content-card--visual" data-url="https://www.youtube.com/" type="button">
-          <span class="content-card__source">YouTube</span>
-          <span class="content-card__media content-card__media--youtube" aria-hidden="true"></span>
-          <span class="content-card__hint">prototype · one click</span>
-        </button>
-
-        <button class="content-card content-card--text" data-url="https://arxiv.org/" type="button">
-          <span class="content-card__source">arXiv</span>
-          <strong>Interesting paper goes here.</strong>
-          <span class="content-card__hint">prototype · one click</span>
-        </button>
+      <section class="compact-feed ${countClass}" aria-label="Cached discoveries">
+        ${feedMarkup}
       </section>
     </main>
   `;
 
   document.querySelector('[data-action="board"]')?.addEventListener("click", () => {
     shortcutPopoverOpen = false;
+    refreshPopoverOpen = false;
     void transitionView("openBoard");
   });
 
   document.querySelector('[data-action="shortcut-settings"]')?.addEventListener("click", () => {
     shortcutPopoverOpen = true;
     shortcutFormError = shellStatus.globalShortcutError;
+    refreshPopoverOpen = false;
     void transitionView("openBoard");
   });
 
@@ -141,26 +168,52 @@ function renderCompact(): void {
     void transitionView("globalToggle");
   });
 
-  for (const card of document.querySelectorAll<HTMLElement>("[data-url]")) {
-    card.addEventListener("click", () => {
-      const url = card.dataset.url;
-      if (url) {
-        void openContent(url);
-      }
-    });
-  }
+  bindContentLinks();
+  void markItemsSeen(items);
+}
+
+function renderCompactItemMarkup(item: CachedItem): string {
+  const label = getSourceLabel(item.sourceKind);
+  const title = item.title?.trim() || label;
+  const useImage = Boolean(item.imageUrl) && item.sourceKind !== "arxiv";
+  const sourceClass = sourceClassName(item.sourceKind);
+  const authorMarkup = item.author
+    ? `<span class="content-card__author">${escapeHtml(item.author)}</span>`
+    : "";
+  const imageMarkup = useImage
+    ? `<img class="content-card__image" src="${escapeHtml(item.imageUrl ?? "")}" alt="" loading="eager" decoding="async">`
+    : "";
+
+  return `
+    <button
+      class="content-card content-card--${useImage ? "visual" : "text"} content-card--${sourceClass}"
+      data-content-item-id="${escapeHtml(item.id)}"
+      type="button"
+    >
+      ${imageMarkup}
+      <span class="content-card__source">${escapeHtml(label)}</span>
+      <span class="content-card__copy">
+        <strong>${escapeHtml(title)}</strong>
+        ${authorMarkup}
+      </span>
+    </button>
+  `;
 }
 
 function renderBoard(): void {
   const widgetMarkup = boardWidgets.map(renderWidgetMarkup).join("");
   const pickerMarkup = addPoint ? renderAddPickerMarkup(addPoint) : "";
   const shortcutPopoverMarkup = shortcutPopoverOpen ? renderShortcutPopoverMarkup() : "";
+  const refreshPopoverMarkup = refreshPopoverOpen ? renderRefreshPopoverMarkup() : "";
 
   root.innerHTML = `
     <main class="board-shell">
       <header class="board-toolbar">
         <strong>Board</strong>
         <span class="board-toolbar__hint">Click empty space to add · drag to move</span>
+        <button class="refresh-control" data-action="refresh-settings" type="button" aria-label="Automatic refresh settings">
+          Auto · ${escapeHtml(formatRefreshIntervalShort(refreshSettings.autoIntervalSeconds))}
+        </button>
         <button class="icon-button" data-action="shortcut-settings" type="button" aria-label="Global shortcut settings">⌨</button>
         <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle">×</button>
       </header>
@@ -169,16 +222,29 @@ function renderBoard(): void {
         ${pickerMarkup}
       </section>
       ${shortcutPopoverMarkup}
+      ${refreshPopoverMarkup}
     </main>
   `;
 
   document.querySelector('[data-action="collapse"]')?.addEventListener("click", () => {
     shortcutPopoverOpen = false;
+    refreshPopoverOpen = false;
     void transitionView("globalToggle");
   });
 
   document.querySelector('[data-action="shortcut-settings"]')?.addEventListener("click", () => {
     shortcutPopoverOpen = !shortcutPopoverOpen;
+    shortcutFormError = null;
+    refreshPopoverOpen = false;
+    refreshFormError = null;
+    addPoint = null;
+    renderBoard();
+  });
+
+  document.querySelector('[data-action="refresh-settings"]')?.addEventListener("click", () => {
+    refreshPopoverOpen = !refreshPopoverOpen;
+    refreshFormError = null;
+    shortcutPopoverOpen = false;
     shortcutFormError = null;
     addPoint = null;
     renderBoard();
@@ -204,7 +270,14 @@ function renderBoard(): void {
   });
 
   bindShortcutPopover();
+  bindRefreshPopover();
   bindWidgetInteractions();
+  bindContentLinks();
+
+  const visibleItems = boardWidgets
+    .map(findCachedItemForWidget)
+    .filter((item): item is CachedItem => item !== null);
+  void markItemsSeen(visibleItems);
 
   if (!boardLoaded) {
     boardLoaded = true;
@@ -213,22 +286,50 @@ function renderBoard(): void {
 }
 
 function renderWidgetMarkup(widget: WidgetLayout): string {
-  const label = SOURCE_LABELS[widget.sourceKind] ?? "Source";
+  const label = getSourceLabel(widget.sourceKind);
+  const item = findCachedItemForWidget(widget);
+  const sourceClass = sourceClassName(widget.sourceKind);
+  const contentMarkup = item
+    ? renderBoardItemMarkup(item)
+    : `
+      <div class="board-widget__content board-widget__content--empty">
+        <span class="board-widget__preview">No cached ${escapeHtml(label)} item yet</span>
+      </div>
+    `;
+
   return `
     <article
-      class="board-widget board-widget--${widget.sourceKind}"
+      class="board-widget board-widget--${sourceClass}"
       data-widget-id="${widget.id}"
       style="left:${widget.x}px;top:${widget.y}px;width:${widget.width}px;height:${widget.height}px"
     >
       <div class="board-widget__drag" data-drag-handle>
-        <span>${label}</span>
-        <button class="board-widget__delete" data-delete-widget type="button" aria-label="Delete ${label}">×</button>
+        <span>${escapeHtml(label)}</span>
+        <button class="board-widget__delete" data-delete-widget type="button" aria-label="Delete ${escapeHtml(label)}">×</button>
       </div>
-      <div class="board-widget__content" aria-hidden="true">
-        <span class="board-widget__preview">${label}</span>
-      </div>
-      <button class="board-widget__resize" data-resize-handle type="button" aria-label="Resize ${label}"></button>
+      ${contentMarkup}
+      <button class="board-widget__resize" data-resize-handle type="button" aria-label="Resize ${escapeHtml(label)}"></button>
     </article>
+  `;
+}
+
+function renderBoardItemMarkup(item: CachedItem): string {
+  const title = item.title?.trim() || getSourceLabel(item.sourceKind);
+  const useImage = Boolean(item.imageUrl) && item.sourceKind !== "arxiv";
+  const imageMarkup = useImage
+    ? `<img class="board-widget__image" src="${escapeHtml(item.imageUrl ?? "")}" alt="" loading="lazy" decoding="async">`
+    : "";
+
+  return `
+    <button
+      class="board-widget__content board-widget__content--cached${useImage ? " board-widget__content--visual" : ""}"
+      data-content-item-id="${escapeHtml(item.id)}"
+      type="button"
+      title="Open original content"
+    >
+      ${imageMarkup}
+      <span class="board-widget__item-title">${escapeHtml(title)}</span>
+    </button>
   `;
 }
 
@@ -243,7 +344,7 @@ function renderAddPickerMarkup(point: Point): string {
         ${Object.entries(SOURCE_LABELS)
           .map(
             ([kind, label]) =>
-              `<button data-add-source="${kind}" type="button">${label}</button>`,
+              `<button data-add-source="${kind}" type="button">${escapeHtml(label)}</button>`,
           )
           .join("")}
       </div>
@@ -264,6 +365,22 @@ function renderShortcutPopoverMarkup(): string {
           <button type="submit">Save</button>
         </div>
       </form>
+    </aside>
+  `;
+}
+
+function renderRefreshPopoverMarkup(): string {
+  const step = refreshStepFromSeconds(refreshSettings.autoIntervalSeconds);
+  return `
+    <aside class="refresh-popover" aria-label="Automatic refresh settings">
+      <div class="refresh-popover__heading">
+        <label for="refresh-range">Automatic refresh</label>
+        <output id="refresh-value" for="refresh-range">${escapeHtml(formatRefreshInterval(stepToRefreshSeconds(step)))}</output>
+      </div>
+      <input id="refresh-range" type="range" min="0" max="${MAX_REFRESH_STEPS}" step="1" value="${step}">
+      <div class="refresh-popover__scale" aria-hidden="true"><span>OFF</span><span>24 h</span></div>
+      <p>Changes are saved when you release the slider. Manual refresh can remain available when automatic refresh is off.</p>
+      <p id="refresh-error" class="refresh-popover__error"${refreshFormError ? "" : " hidden"}>${escapeHtml(refreshFormError ?? "")}</p>
     </aside>
   `;
 }
@@ -302,6 +419,30 @@ function bindShortcutPopover(): void {
   input.select();
 }
 
+function bindRefreshPopover(): void {
+  if (!refreshPopoverOpen) {
+    return;
+  }
+
+  const input = document.querySelector<HTMLInputElement>("#refresh-range");
+  const output = document.querySelector<HTMLOutputElement>("#refresh-value");
+  const errorElement = document.querySelector<HTMLElement>("#refresh-error");
+  if (!input || !output || !errorElement) {
+    return;
+  }
+
+  input.addEventListener("input", () => {
+    const step = clamp(Math.round(input.valueAsNumber), 0, MAX_REFRESH_STEPS);
+    output.textContent = formatRefreshInterval(stepToRefreshSeconds(step));
+    errorElement.hidden = true;
+  });
+
+  input.addEventListener("change", () => {
+    const step = clamp(Math.round(input.valueAsNumber), 0, MAX_REFRESH_STEPS);
+    void saveAutoRefreshInterval(step);
+  });
+}
+
 function handleBoardPointerDown(event: PointerEvent): void {
   const canvas = event.currentTarget as HTMLElement;
   if (event.target !== canvas) {
@@ -314,6 +455,8 @@ function handleBoardPointerDown(event: PointerEvent): void {
   addPoint = { x: Math.round(x), y: Math.round(y) };
   shortcutPopoverOpen = false;
   shortcutFormError = null;
+  refreshPopoverOpen = false;
+  refreshFormError = null;
   renderBoard();
 }
 
@@ -338,6 +481,19 @@ function bindWidgetInteractions(): void {
     element.querySelector<HTMLElement>("[data-delete-widget]")?.addEventListener("click", (event) => {
       event.stopPropagation();
       void removeBoardWidget(id);
+    });
+  }
+}
+
+function bindContentLinks(): void {
+  for (const element of document.querySelectorAll<HTMLElement>("[data-content-item-id]")) {
+    element.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const id = element.dataset.contentItemId;
+      const item = id ? cachedItems.find((candidate) => candidate.id === id) : undefined;
+      if (item) {
+        void openContent(item.externalUrl);
+      }
     });
   }
 }
@@ -423,6 +579,13 @@ function updateLocalGeometry(id: number, element: HTMLElement): void {
   widget.height = element.offsetHeight;
 }
 
+function findCachedItemForWidget(widget: WidgetLayout): CachedItem | null {
+  return cachedItems.find(
+    (item) =>
+      item.sourceKind === widget.sourceKind && item.sourceConfigJson === widget.sourceConfigJson,
+  ) ?? null;
+}
+
 async function loadBoardWidgets(): Promise<void> {
   try {
     boardWidgets = await invoke<WidgetLayout[]>("list_widgets");
@@ -432,6 +595,52 @@ async function loadBoardWidgets(): Promise<void> {
   } catch (error) {
     boardLoaded = false;
     console.error("failed to load board widgets", error);
+  }
+}
+
+async function loadCachedItems(): Promise<void> {
+  if (cacheLoadPromise) {
+    return cacheLoadPromise;
+  }
+
+  cacheLoadPromise = (async () => {
+    try {
+      cachedItems = await invoke<CachedItem[]>("list_cached_items", { limit: CACHE_LIMIT });
+      if (currentView === "compact") {
+        renderCompact();
+      } else if (currentView === "board") {
+        renderBoard();
+      }
+    } catch (error) {
+      console.error("failed to load cached items", error);
+    } finally {
+      cacheLoadPromise = null;
+    }
+  })();
+
+  return cacheLoadPromise;
+}
+
+async function markItemsSeen(items: CachedItem[]): Promise<void> {
+  const unseenItems = items.filter((item) => item.isUnseen);
+  if (unseenItems.length === 0) {
+    return;
+  }
+
+  for (const item of unseenItems) {
+    item.isUnseen = false;
+  }
+
+  try {
+    const next = await invoke<ShellStatus>("mark_cached_items_seen", {
+      ids: unseenItems.map((item) => item.id),
+    });
+    applyShellStatus(next);
+  } catch (error) {
+    for (const item of unseenItems) {
+      item.isUnseen = true;
+    }
+    console.error("failed to mark cached items seen", error);
   }
 }
 
@@ -502,10 +711,37 @@ async function saveGlobalShortcut(shortcut: string): Promise<void> {
   }
 }
 
+async function saveAutoRefreshInterval(step: number): Promise<void> {
+  const autoIntervalSeconds = stepToRefreshSeconds(step);
+  try {
+    refreshSettings = await invoke<RefreshSettings>("set_auto_refresh_interval", {
+      autoIntervalSeconds,
+    });
+    refreshFormError = null;
+
+    const output = document.querySelector<HTMLOutputElement>("#refresh-value");
+    if (output) {
+      output.textContent = formatRefreshInterval(refreshSettings.autoIntervalSeconds);
+    }
+    const button = document.querySelector<HTMLButtonElement>('[data-action="refresh-settings"]');
+    if (button) {
+      button.textContent = `Auto · ${formatRefreshIntervalShort(refreshSettings.autoIntervalSeconds)}`;
+    }
+  } catch (error) {
+    refreshFormError = getErrorMessage(error);
+    if (currentView === "board") {
+      renderBoard();
+    }
+  }
+}
+
 async function transitionView(event: ViewEvent): Promise<void> {
   try {
     currentView = await invoke<ViewState>("transition_view", { event });
     render();
+    if (currentView === "compact" || currentView === "board") {
+      void loadCachedItems();
+    }
   } catch (error) {
     console.error("view transition failed", error);
   }
@@ -524,26 +760,130 @@ async function boot(): Promise<void> {
   await listen<ViewState>("view-state-changed", (event) => {
     currentView = event.payload;
     render();
+    if (currentView === "compact" || currentView === "board") {
+      void loadCachedItems();
+    }
   });
 
   await listen<ShellStatus>("shell-status-changed", (event) => {
-    shellStatus = event.payload;
-    render();
+    applyShellStatus(event.payload);
   });
 
-  try {
-    currentView = await invoke<ViewState>("get_view_state");
-  } catch (error) {
-    console.error("failed to read initial view state", error);
+  const [viewResult, shellResult, cacheResult, refreshResult] = await Promise.allSettled([
+    invoke<ViewState>("get_view_state"),
+    invoke<ShellStatus>("get_shell_status"),
+    invoke<CachedItem[]>("list_cached_items", { limit: CACHE_LIMIT }),
+    invoke<RefreshSettings>("get_refresh_settings"),
+  ]);
+
+  if (viewResult.status === "fulfilled") {
+    currentView = viewResult.value;
+  } else {
+    console.error("failed to read initial view state", viewResult.reason);
   }
 
-  try {
-    shellStatus = await invoke<ShellStatus>("get_shell_status");
-  } catch (error) {
-    console.error("failed to read shell status", error);
+  if (shellResult.status === "fulfilled") {
+    shellStatus = shellResult.value;
+  } else {
+    console.error("failed to read shell status", shellResult.reason);
+  }
+
+  if (cacheResult.status === "fulfilled") {
+    cachedItems = cacheResult.value;
+  } else {
+    console.error("failed to read cached items", cacheResult.reason);
+  }
+
+  if (refreshResult.status === "fulfilled") {
+    refreshSettings = refreshResult.value;
+  } else {
+    console.error("failed to read refresh settings", refreshResult.reason);
   }
 
   render();
+}
+
+function applyShellStatus(next: ShellStatus): void {
+  const shortcutChanged =
+    shellStatus.globalShortcut !== next.globalShortcut ||
+    shellStatus.globalShortcutError !== next.globalShortcutError;
+  shellStatus = next;
+
+  if (currentView === "idle") {
+    const badge = document.querySelector<HTMLElement>(".idle-orb__badge");
+    if (badge) {
+      badge.hidden = !shellStatus.hasUnseen;
+    }
+    return;
+  }
+
+  if (shortcutChanged && currentView === "compact") {
+    renderCompact();
+  } else if (shortcutChanged && currentView === "board" && shortcutPopoverOpen) {
+    renderBoard();
+  }
+}
+
+function refreshStepFromSeconds(seconds: number | null): number {
+  if (seconds === null) {
+    return 0;
+  }
+  return clamp(Math.round(seconds / REFRESH_STEP_SECONDS), 1, MAX_REFRESH_STEPS);
+}
+
+function stepToRefreshSeconds(step: number): number | null {
+  if (step <= 0) {
+    return null;
+  }
+  return clamp(Math.round(step), 1, MAX_REFRESH_STEPS) * REFRESH_STEP_SECONDS;
+}
+
+function formatRefreshInterval(seconds: number | null): string {
+  if (seconds === null) {
+    return "OFF";
+  }
+  if (seconds < 60 * 60) {
+    return `${Math.round(seconds / 60)} min`;
+  }
+
+  const hours = Math.floor(seconds / (60 * 60));
+  const minutes = Math.round((seconds % (60 * 60)) / 60);
+  return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
+}
+
+function formatRefreshIntervalShort(seconds: number | null): string {
+  if (seconds === null) {
+    return "OFF";
+  }
+  if (seconds < 60 * 60) {
+    return `${Math.round(seconds / 60)}m`;
+  }
+
+  const hours = seconds / (60 * 60);
+  return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
+}
+
+function getSourceLabel(sourceKind: string): string {
+  return SOURCE_LABELS[sourceKind] ?? sourceKind;
+}
+
+function sourceClassName(sourceKind: string): string {
+  const safe = sourceKind.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  return safe || "generic";
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character] ?? character,
+  );
 }
 
 function getErrorMessage(error: unknown): string {

@@ -1,0 +1,27 @@
+name: Bootstrap Cargo.lock
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/bootstrap-cargo-lock.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Generate application lockfile
+        run: cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
+      - name: Upload generated lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-lockfile
+          path: src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 1

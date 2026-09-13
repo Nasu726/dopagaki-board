@@ -16,20 +16,43 @@ Merged to `main`:
 Issue #3 is intentionally still open. Its code-side acceptance criteria are complete; the remaining item is a **real desktop Idle CPU/RSS baseline** recorded in `docs/PERF_BASELINE.md`.
 
 Active branch: `feat/cache-scheduler`.
-Current work: first implementation slice of Issue #5.
+Active PR: #19.
+Current work: backend/data-layer slice of Issue #5.
 
-This slice intentionally stops before real HTTP adapters/background I/O. It establishes:
+PR #19 intentionally stops before frontend wiring and real HTTP adapters. It establishes:
 
 1. SQLite v3 cache + refresh-state schema
-2. one-time persistent demo cache so startup can render useful data with networking unavailable
+2. one-time persistent demo cache so startup has useful data with networking unavailable
 3. refresh interval persistence (`OFF` or 5 min .. 24 h, default 1 h)
 4. a pure Rust scheduler core with deterministic tests for due times, deduplication, manual-priority upgrade, concurrency limit, and exponential backoff
 5. Tauri commands for cache reads/seen state and refresh settings
-6. next: wire the existing frontend to cached items and the refresh slider, then run all three OS CI workflows
+6. architecture/handoff documentation
 
-After this slice is merged, implement the event-driven runtime coordinator + first real source adapter. Do not add HTTP dependencies before that boundary is clear.
+After #19 is green and merged, create a **new clean branch** for frontend cache-driven Compact/Board rendering and the refresh slider. After that, implement the event-driven runtime coordinator + first real source adapter. Do not hide HTTP/runtime work inside #19.
 
 Issue #6 tracks the broader performance-budget/refactor discipline. Issue #15 tracks Cargo lockfile/cache/reproducibility work separately.
+
+## Branch hygiene
+
+Keep the repository close to `main + one active feature branch` whenever practical.
+
+- after a feature PR is merged or superseded, delete its branch
+- do not keep stacked/temporary branches once their clean replacement exists
+- do not reuse an old feature branch for unrelated work
+- before creating a new branch, prefer branching from current `main`
+
+As of 2026-09-13, several old branches still exist because the connected GitHub tool currently exposes branch listing/update but not branch-ref deletion. They are obsolete and may be deleted safely once a deletion-capable path is available:
+
+- `ci/cross-platform`
+- `feat/bootstrap-tauri`
+- `feat/free-board`
+- `feat/free-board-clean`
+- `feat/idle-compact`
+- `feat/idle-compact-shell`
+- `feat/shortcut-badge`
+- `perf/idle-baseline-tools`
+
+Do not base new work on those branches.
 
 ## Cross-platform CI knowledge
 
@@ -94,6 +117,10 @@ Current invariants:
 - blocked sources are not started before their blocked-until boundary
 
 The runtime coordinator is not implemented in this first slice. When it is added, use event/deadline wakeups rather than frequent polling. Actual HTTP waits should use async I/O, not a permanently occupied OS thread.
+
+### Tauri command macro boundary
+
+Keep `#[tauri::command]` functions registered from the module where the macro is defined. Re-exporting those functions from `commands/mod.rs` and passing the re-exported path to `generate_handler!` caused the generated command marker symbols to be unresolved in PR #19. Use paths such as `commands::cache_refresh::get_refresh_settings` instead.
 
 ### Cache-first startup
 
@@ -179,7 +206,8 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 ## Restart checklist
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Inspect Issues #3, #5, #6, and #15.
-3. If `feat/cache-scheduler` is active, wire frontend cache/refresh controls, then run Linux/Windows/macOS CI before merging.
-4. After that slice, implement the event-driven coordinator and first real adapter rather than expanding the pure scheduler abstraction speculatively.
-5. Run the real release-build Idle baseline when a desktop session is available and record it in `docs/PERF_BASELINE.md`; close Issue #3 only then.
+2. Inspect PR #19 plus Issues #3, #5, #6, and #15.
+3. If #19 is open, require Linux/Windows/macOS CI green and merge it as the backend/data-layer slice.
+4. Start frontend cache rendering + refresh slider from fresh `main` in a new branch.
+5. Then implement the event-driven coordinator and first real adapter rather than expanding the pure scheduler abstraction speculatively.
+6. Run the real release-build Idle baseline when a desktop session is available and record it in `docs/PERF_BASELINE.md`; close Issue #3 only then.

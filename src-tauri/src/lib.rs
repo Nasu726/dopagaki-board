@@ -30,16 +30,20 @@ pub fn run() {
             let connection = db::open(&db_path)?;
             let global_shortcut = db::get_setting(&connection, app::GLOBAL_SHORTCUT_SETTING_KEY)?
                 .unwrap_or_else(|| app::DEFAULT_GLOBAL_SHORTCUT.to_owned());
-            let global_shortcut_error = app
-                .global_shortcut()
-                .register(global_shortcut.as_str())
-                .err()
-                .map(|error| format!("could not register {global_shortcut}: {error}"));
 
             app.manage(app::AppState::new(
                 connection,
-                app::ShellStatus::new(global_shortcut, global_shortcut_error),
+                app::ShellStatus::new(global_shortcut.clone(), None),
             ));
+
+            if let Err(error) = app.global_shortcut().register(global_shortcut.as_str()) {
+                let message = format!("could not register {global_shortcut}: {error}");
+                let state = app.state::<app::AppState>();
+                match state.shell.lock() {
+                    Ok(mut shell) => shell.global_shortcut_error = Some(message),
+                    Err(_) => eprintln!("global shortcut registration failed and shell state lock was poisoned"),
+                }
+            }
 
             if let Err(error) = app::apply_current_view(app.handle()) {
                 eprintln!("failed to apply initial view state: {error}");

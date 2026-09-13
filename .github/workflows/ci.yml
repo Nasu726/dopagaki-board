@@ -31,6 +31,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Check performance helper syntax
+        run: python3 -m py_compile scripts/measure_idle_linux.py
+
       - name: Install frontend dependencies
         run: npm install
 

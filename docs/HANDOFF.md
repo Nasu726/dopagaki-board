@@ -6,58 +6,89 @@ Last updated: 2026-09-13
 
 ## Current checkpoint
 
-PR #12 (free-placement Board) is merged to `main`; Issue #4 is complete. Its final CI passed frontend build, rustfmt, Rust tests, and `cargo check`.
+PR #12 (free-placement Board) and PR #16 (configurable global shortcut + Rust-owned Idle badge) are merged to `main`.
 
-Active implementation branch: `feat/shortcut-badge`.
-Active PR: #16, `Make global shortcut configurable and drive Idle badge from Rust`.
-Current target: finish the remaining code-side acceptance criteria of Issue #3:
+Issue #3 is intentionally still open. Its code-side acceptance criteria are complete; the remaining item is a **real desktop Idle CPU/RSS baseline** recorded in `docs/PERF_BASELINE.md`.
 
-1. configurable, persisted global shortcut with explicit conflict/error handling
-2. Rust-owned boolean unseen/update badge for Idle
-3. preserve a minimal UI surface for shortcut configuration
+Active branch: `perf/idle-baseline-tools`.
+Current work:
 
-Idle CPU/RSS measurement still requires a real desktop session and belongs in `docs/PERF_BASELINE.md`; coordinate that with Issue #6 rather than pretending CI can measure it.
+1. make the Idle baseline procedure reproducible before source adapters/scheduler/preloading arrive
+2. provide a dependency-free Linux process-tree sampler
+3. perform the real release-build desktop measurement and record results
+4. close Issue #3 only after the real measurement exists
+
+Issue #6 tracks the broader performance-budget/refactor discipline. After the baseline, the next major functional target is Issue #5 (cache-first startup + soft-deadline scheduler).
+
+## Idle baseline procedure
+
+Use a release build. Do not use `tauri dev` or CI numbers as the resident-product baseline.
+
+Canonical Linux run:
+
+```bash
+npm install
+npm run tauri build
+./src-tauri/target/release/dopagaki-board &
+APP_PID=$!
+python3 scripts/measure_idle_linux.py --pid "$APP_PID" --settle 60 --duration 300 --interval 1 --csv /tmp/dopagaki-idle.csv
+```
+
+Keep the app in Idle with no interaction during settle/sample. `docs/PERF_BASELINE.md` contains the full metric definitions and condition template.
+
+The Linux helper recursively samples the root process plus descendants so WebKit subprocesses are included. It reports conservative summed RSS and, where readable, process-tree PSS. It deliberately does not fake per-process network bytes from `/proc/<pid>/net/dev`, because that file is network-namespace scoped rather than PID-attributed.
 
 ## Shortcut implementation and invariants
 
-The default is `CmdOrCtrl+Shift+Space`. The underlying `global-hotkey` parser explicitly accepts `CmdOrCtrl` as a cross-platform alias, even though Tauri examples often spell the same concept `CommandOrControl`.
+The default is `CmdOrCtrl+Shift+Space`. The underlying `global-hotkey` parser accepts `CmdOrCtrl` as a cross-platform alias.
 
-Reuse the existing SQLite `settings` table; no schema migration is needed.
+- persisted setting key: `shell.global_shortcut`
+- no schema migration; use the existing SQLite settings table
+- publish/manage `AppState` before OS shortcut registration so the plugin callback cannot observe missing managed state
+- serialize runtime shortcut changes with `AppState.shortcut_change`
+- replace bindings non-destructively: register new -> unregister old -> persist new
+- ordinary parse/conflict failure leaves the old working shortcut intact
+- persistence failure attempts to remove the new binding and restore the old runtime binding
+- retrying the same configured shortcut can clear a prior registration error without rewriting SQLite
+- never silently register fallback shortcuts
+- shortcut registration/persistence remains Rust-owned; do not add the JavaScript global-shortcut plugin
 
-- At startup, load the persisted shortcut; use the default only when no setting exists.
-- Register exactly the selected shortcut; do not silently register fallbacks.
-- **Manage/publish `AppState` before registering the OS shortcut.** The plugin handler can fire as soon as registration succeeds, so registering first creates a small race in which the handler could access state that Tauri does not yet manage.
-- If startup registration fails, retain the configured value plus an error in Rust-owned shell status so the UI can explain the conflict.
-- Serialize runtime shortcut changes with a dedicated mutex. Tauri commands can overlap; two concurrent replacement attempts must not interleave register/unregister/persist operations.
-- When changing shortcut, register the requested new binding while the old binding is still active. Ordinary parse/conflict failure therefore leaves the known-working old shortcut untouched.
-- Only after new registration succeeds, unregister the old shortcut and then persist the new setting.
-- If the old unregister step fails, best-effort unregister the newly registered shortcut and return an error rather than intentionally leaving two bindings.
-- If persistence fails after a swap, best-effort remove the new binding and restore the previous runtime binding.
-- Retrying the **same** configured shortcut does not need another SQLite write. If the previous startup registration had failed but registration now succeeds, clear the registration error directly.
-- Keep shortcut registration and persistence in Rust; do not add the JavaScript global-shortcut plugin.
+## Shell status / unseen badge
 
-## Unseen badge implementation
+`ShellStatus` is intentionally orthogonal to `ViewState` and currently contains:
 
-The Idle blue dot is driven by an orthogonal Rust-owned `ShellStatus.has_unseen` boolean rather than overloading `ViewState`.
+- `has_unseen: bool`
+- configured global shortcut
+- active shortcut registration error, if any
 
-- `ShellStatus` also carries the configured global shortcut and an active shortcut registration error.
-- frontend reads/reflects shell status but is not its source of truth
-- `shell-status-changed` publishes status changes
-- keep unseen state boolean for now; do not introduce counts or notification-center semantics prematurely
+The frontend reflects this state but is not its source of truth. When Issue #5 later changes `has_unseen` from background refreshes, update only the relevant visible shell element. Do not re-render the whole Board on every shell-status event because an active drag/resize/settings interaction could be destroyed.
 
-When the scheduler later starts changing `has_unseen` in the background, do **not** blindly re-render the entire Board on every shell-status event. Board may contain an active drag/resize or settings form. Prefer state-specific targeted updates (Idle badge only, minimal Compact status, Board only where required). This is also recorded on Issue #5.
+## Scheduler design already settled for Issue #5
 
-## Minimal configuration UI
+Do not equate widgets with network fetch jobs.
 
-Do not add a full settings page. PR #16 uses a small keyboard/shortcut popover from the Board toolbar. If startup shortcut registration fails, Compact shows a contextual warning that leads to this configuration affordance.
+Multiple widgets can depend on the same source/config. Separate:
 
-Shortcut/error text is assigned via DOM `.value` / `.textContent` rather than interpolated into HTML markup.
+- widget state: desired freshness, visible priority, manual refresh request
+- source-instance state (source kind + canonical config): due/in-flight, validators, quota/backoff, last attempt/success
+- coordinator: priority, deduplication, bounded concurrency
+
+Equivalent source/config requests should fetch once and fan the normalized/cache result out to dependent widgets. On wake/resume after long sleep, collapse duplicate overdue work and stagger automatic refreshes rather than bursting all sources at once.
+
+A cross-platform OS "system idle" detector is not required for MVP. Soft deadlines, small concurrency, foreground priority, backoff, and interruptible preload provide the important non-interference behavior with much less complexity.
+
+## Rust temporary-lifetime pitfall
+
+Two PRs have exposed the same family of `E0597` surprises:
+
+- PR #12: a tail `query_map(...).collect()` expression retained a temporary relative to the prepared statement
+- PR #16: a tail `match state.shell.lock() { ... }` retained the `Result<MutexGuard<...>>` temporary relative to the Tauri `State` binding
+
+When a guard/iterator/borrow-producing expression at block tail triggers a surprising lifetime error, first make destruction order explicit with a local binding or a terminating semicolon. Do not immediately redesign ownership when explicit drop order is sufficient.
 
 ## Board implementation knowledge
 
-PR #12 initially exposed Rust `E0597` in `src-tauri/src/db/widgets.rs`: returning a `query_map(...).collect()` tail expression kept the mapped-row temporary alive too long relative to the prepared statement. Binding the collected `Vec` to a local value fixed it (`c970d1a1a7d51f470f9051a1cfcdeeea25aa383e`). A following Actions run failed at startup with zero jobs, but a later normal run passed fully; treat zero-job `startup_failure` separately from code failures.
-
-Board drag/resize updates the DOM during pointer movement and persists geometry only once at gesture end. Keep that behavior.
+Board drag/resize updates the DOM during pointer movement and persists geometry only once at gesture end. Do not write SQLite on every pointer move.
 
 The frontend is intentionally Vanilla TypeScript. Do not add React/Vue/Svelte, a grid engine, or a canvas dependency merely for current Board interactions.
 
@@ -65,9 +96,9 @@ Schema v2 already reserves `source_config_json` and `refresh_config_json`. Use t
 
 ## CI follow-up
 
-Issue #15 tracks missing `Cargo.lock` / repeated Rust dependency resolution and possible conservative CI caching. Keep that separate from Issue #3 unless it becomes a blocker.
+Issue #15 tracks missing `Cargo.lock` and repeated Rust dependency resolution/build cost.
 
-Cold Ubuntu CI repeatedly spends roughly tens of seconds installing Tauri/WebKitGTK system packages and minutes compiling the Rust/Tauri graph. A lockfile improves reproducibility/resolution; it does not by itself solve cold compilation. Measure lockfile and cache changes separately.
+Current cold Ubuntu CI repeatedly logs roughly 487 resolved Rust packages and takes about 3m20s before reaching an app-level Rust compile error. First commit the executable's Cargo lockfile and use `--locked` for reproducibility; evaluate build caching separately so lockfile benefit and cache benefit are not conflated.
 
 ## Repository-memory protocol
 
@@ -86,6 +117,8 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 ## Restart checklist
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Inspect Issue #3 and PR #16.
-3. Verify current CI state before changing or merging the branch.
-4. Update this file whenever the true restart point changes.
+2. Inspect Issues #3, #5, #6, and #15.
+3. If `perf/idle-baseline-tools` is still active, validate the Linux sampler and merge its PR before recording measurements against `main`.
+4. Run the release-build Idle baseline on a real desktop and record results in `docs/PERF_BASELINE.md`.
+5. Close Issue #3 only after that measurement is committed.
+6. Then continue with Issue #5 unless another priority is explicitly chosen.

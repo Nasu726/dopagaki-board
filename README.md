@@ -28,9 +28,10 @@ Keep interesting sources such as YouTube, arXiv, Wikipedia, NHK, Qiita, and Zenn
 - [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) — budgets and simplification loop
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — implementation sequence
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — durable decision log
+- [`docs/HANDOFF.md`](docs/HANDOFF.md) — current checkpoint, known incidents, and exact restart path
 - [`AGENTS.md`](AGENTS.md) — instructions for long-running AI-assisted development
 
-GitHub issue #1 is also a complete snapshot of the initial planning discussion for recovery if context is lost.
+GitHub issue #1 is also a complete snapshot of the initial planning discussion for recovery if context is lost. Meta issue #13 tracks the rule that reusable development knowledge must remain repository-native rather than living only in chat.
 
 ## Development
 

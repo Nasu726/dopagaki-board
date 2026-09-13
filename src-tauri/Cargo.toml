@@ -1,0 +1,18 @@
+[package]
+name = "dopagaki-board"
+version = "0.1.0"
+description = "Lightweight desktop discovery board for ambient feeds and one-click content access"
+authors = ["nasu"]
+edition = "2021"
+
+[lib]
+name = "dopagaki_board_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+rusqlite = { version = "0.37", features = ["bundled"] }

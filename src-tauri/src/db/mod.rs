@@ -1,5 +1,5 @@
 pub(crate) mod cache;
-mod migrations;
+pub(crate) mod migrations;
 pub(crate) mod widgets;
 
 use rusqlite::{params, Connection, OptionalExtension, Result};

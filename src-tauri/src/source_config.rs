@@ -59,6 +59,10 @@ mod tests {
     fn source_config_must_be_a_bounded_json_object() {
         assert!(canonicalize("[]").is_err());
         assert!(canonicalize("not-json").is_err());
-        assert!(canonicalize(&format!(r#"{{"x":"{}"}}"#, "x".repeat(MAX_SOURCE_CONFIG_BYTES))).is_err());
+        assert!(canonicalize(&format!(
+            r#"{{"x":"{}"}}"#,
+            "x".repeat(MAX_SOURCE_CONFIG_BYTES)
+        ))
+        .is_err());
     }
 }

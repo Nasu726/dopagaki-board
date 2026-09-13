@@ -6,19 +6,64 @@ Last updated: 2026-09-13
 
 ## Current checkpoint
 
-PR #12 (free-placement Board) and PR #16 (configurable global shortcut + Rust-owned Idle badge) are merged to `main`.
+PR #12 (free-placement Board), PR #16 (configurable global shortcut + Rust-owned Idle badge), and PR #17 (Linux Idle performance baseline tooling) are merged to `main`.
 
 Issue #3 is intentionally still open. Its code-side acceptance criteria are complete; the remaining item is a **real desktop Idle CPU/RSS baseline** recorded in `docs/PERF_BASELINE.md`.
 
-Active branch: `perf/idle-baseline-tools`.
+Active branch: `ci/cross-platform`.
+Active PR: #18.
 Current work:
 
-1. make the Idle baseline procedure reproducible before source adapters/scheduler/preloading arrive
-2. provide a dependency-free Linux process-tree sampler
-3. perform the real release-build desktop measurement and record results
-4. close Issue #3 only after the real measurement exists
+1. keep Linux validation as an independent workflow
+2. add independent Windows and macOS validation
+3. require frontend build + Rust tests/check + a real Tauri release build (`--no-bundle --ci`) on each OS
+4. merge only after all three platform workflows are green
+5. then return to the real release-build Idle baseline and Issue #5 scheduler work
 
-Issue #6 tracks the broader performance-budget/refactor discipline. After the baseline, the next major functional target is Issue #5 (cache-first startup + soft-deadline scheduler).
+Issue #6 tracks the broader performance-budget/refactor discipline. Issue #15 tracks Cargo lockfile/cache/reproducibility work separately.
+
+## Cross-platform CI knowledge
+
+The workflows are deliberately separate rather than one matrix job:
+
+- `.github/workflows/ci.yml` -> `CI / Linux`
+- `.github/workflows/ci-windows.yml` -> `CI / Windows`
+- `.github/workflows/ci-macos.yml` -> `CI macOS`
+
+This makes a platform-specific failure independently visible and rerunnable.
+
+Each OS should validate:
+
+- frontend production build
+- Rust tests
+- `cargo check`
+- Tauri release application build with `npm run tauri build -- --no-bundle --ci`
+
+Linux additionally owns rustfmt and the syntax check for the Linux performance sampler.
+
+CI is compile/link/configuration validation, not a substitute for real GUI interaction tests. Packaging/signing is also intentionally separate from this check.
+
+### Windows icon incident
+
+The first Windows run reached the Rust/Tauri build script and failed because `tauri-build` requires `src-tauri/icons/icon.ico` when generating Windows executable resources. Linux and macOS did not expose this requirement.
+
+Repository policy:
+
+- canonical visual source remains `src-tauri/icons/icon.png`
+- `src-tauri/icons/icon.ico.b64` stores the equivalent Windows ICO in text form because the repository connector cannot reliably write binary blobs
+- `scripts/decode_windows_icon.ps1` materializes `src-tauri/icons/icon.ico`
+- Windows CI must run that helper **before any Cargo command**, because even `cargo test` executes `tauri-build`
+- generated `src-tauri/icons/icon.ico` is ignored by Git
+
+For a fresh Windows checkout, run:
+
+```powershell
+pwsh -File scripts/decode_windows_icon.ps1
+```
+
+before invoking Cargo directly. The CI workflow performs this automatically.
+
+The first macOS cross-platform run passed frontend build, Rust tests/check, and the Tauri release build without platform-specific source changes.
 
 ## Idle baseline procedure
 
@@ -98,7 +143,9 @@ Schema v2 already reserves `source_config_json` and `refresh_config_json`. Use t
 
 Issue #15 tracks missing `Cargo.lock` and repeated Rust dependency resolution/build cost.
 
-Current cold Ubuntu CI repeatedly logs roughly 487 resolved Rust packages and takes about 3m20s before reaching an app-level Rust compile error. First commit the executable's Cargo lockfile and use `--locked` for reproducibility; evaluate build caching separately so lockfile benefit and cache benefit are not conflated.
+Current cold CI repeatedly logs roughly 487 resolved Rust packages. First commit the executable's Cargo lockfile and use `--locked` for reproducibility; evaluate build caching separately so lockfile benefit and cache benefit are not conflated.
+
+Do not combine Issue #15 with platform correctness fixes unless a platform run directly proves the lockfile is required for correctness.
 
 ## Repository-memory protocol
 
@@ -117,8 +164,9 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 ## Restart checklist
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Inspect Issues #3, #5, #6, and #15.
-3. If `perf/idle-baseline-tools` is still active, validate the Linux sampler and merge its PR before recording measurements against `main`.
-4. Run the release-build Idle baseline on a real desktop and record results in `docs/PERF_BASELINE.md`.
-5. Close Issue #3 only after that measurement is committed.
-6. Then continue with Issue #5 unless another priority is explicitly chosen.
+2. Inspect PR #18 plus Issues #3, #5, #6, and #15.
+3. If PR #18 is active, require Linux/Windows/macOS workflows to reach the Tauri release-build step and finish green; fix platform-specific failures rather than weakening the checks.
+4. Merge #18 once all three are green.
+5. Run the release-build Idle baseline on a real desktop and record results in `docs/PERF_BASELINE.md`.
+6. Close Issue #3 only after that measurement is committed.
+7. Then continue with Issue #5 unless another priority is explicitly chosen.

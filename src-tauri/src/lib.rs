@@ -82,6 +82,7 @@ pub fn run() {
             commands::set_global_shortcut,
             commands::list_widgets,
             commands::add_widget,
+            commands::update_widget_source_config,
             commands::update_widget_geometry,
             commands::delete_widget,
             commands::refresh_widget,

@@ -6,56 +6,50 @@ Last updated: 2026-09-13
 
 ## Current checkpoint
 
-Active PR: #12, `Free-placement Board with SQLite persistence`.
-Branch: `feat/free-board-clean`.
+PR #12 (free-placement Board) is merged to `main`; Issue #4 is complete. Its final CI passed frontend build, rustfmt, Rust tests, and `cargo check`.
 
-Implemented on the branch:
-- free placement, drag, resize, and delete
-- click-empty-space widget creation
-- source kinds: YouTube, arXiv, Wikipedia, NHK, Qiita, Zenn
-- SQLite persistence
-- schema v2: geometry, display mode, source config JSON, refresh config JSON
-- v1 -> v2 migration preserving existing settings
-- Rust-owned widget CRUD commands
-- one SQLite write at drag/resize gesture end instead of per pointer move
-- no grid framework and no frontend UI framework
+Active implementation branch: `feat/shortcut-badge`.
+Current target: finish the remaining code-side acceptance criteria of Issue #3:
 
-PR #12 should close Issue #4 after a normal green CI run and merge.
-
-## CI incident on PR #12
-
-A normal CI run reached Rust compilation and exposed `E0597` in `src-tauri/src/db/widgets.rs`. The direct `query_map(...).collect()` tail expression kept the mapped-row temporary alive long enough to conflict with the prepared statement lifetime. The fix is to bind the collected `Vec` to a local value and return that value after the iterator temporary drops. Fix commit: `c970d1a1a7d51f470f9051a1cfcdeeea25aa383e`.
-
-The immediately following Actions run (`34749203272`) ended as `startup_failure` with zero jobs created. The workflow definition was still valid and the API refused rerun. Treat this specific result as an Actions startup/infrastructure failure, not as code verification. A later legitimate commit should trigger a fresh run; require a normal green run before merging #12.
-
-The CI workflow checks frontend build, Rust formatting, Rust tests, and `cargo check`. A temporary branch-specific push trigger used during earlier GitHub API trouble has already been removed.
-
-## Next after PR #12
-
-Issue #3 remains open for:
-1. configurable global shortcut with persisted setting and explicit conflict handling
+1. configurable, persisted global shortcut with explicit conflict/error handling
 2. Rust-owned boolean unseen/update badge for Idle
-3. Idle CPU/RSS measurement recorded in `docs/PERF_BASELINE.md`
+3. preserve a minimal UI surface for shortcut configuration
 
-Do not silently register fallback shortcuts if the requested shortcut conflicts. Surface the failure and let the user choose another shortcut.
+Idle CPU/RSS measurement still requires a real desktop session and belongs in `docs/PERF_BASELINE.md`; coordinate that with Issue #6 rather than pretending CI can measure it.
 
-## Implementation knowledge
+## Planned shortcut behavior
 
-### Gesture persistence
+The current default is `CmdOrCtrl+Shift+Space`. Reuse the existing SQLite `settings` table; no schema migration is needed.
 
-Keep drag/resize presentation updates in the DOM during pointer movement, but persist geometry only once at gesture end. Avoid per-pointer-move SQLite writes.
+- At startup, load the persisted shortcut; use the default only when no setting exists.
+- Register exactly the selected shortcut; do not silently register fallbacks.
+- If startup registration fails, retain the configured value plus an error in Rust-owned shell status so the UI can explain the conflict.
+- When changing shortcut, try registering the requested new shortcut while the old binding is still active. Ordinary parse/conflict failure must leave the old shortcut untouched.
+- Only after new registration succeeds, unregister the old shortcut and then persist the new setting.
+- If the old unregister step fails, best-effort unregister the newly registered shortcut and return an error rather than intentionally leaving two bindings.
+- Keep shortcut registration and persistence in Rust; do not add the JavaScript global-shortcut plugin.
 
-### Ownership boundary
+## Planned unseen badge behavior
 
-Durable product state and configuration belong in Rust/SQLite. The WebView should primarily own transient presentation and interaction state.
+The blue dot already exists in Idle markup/CSS but is always hidden. Add an orthogonal Rust-owned boolean shell status rather than overloading `ViewState`.
 
-### Frontend weight
+- expose a small shell-status command/event
+- frontend renders the dot from Rust state
+- keep this boolean; do not introduce counts or a notification-center model yet
 
-The current Board is small enough for Vanilla TypeScript. Do not add a UI framework, grid engine, or canvas dependency merely for drag/resize.
+## Minimal configuration UI
 
-### Schema headroom
+Do not add a full settings page. Use a small keyboard/shortcut popover from the Board toolbar. If startup shortcut registration fails, Compact may show a contextual warning that leads to this configuration affordance.
 
-Schema v2 already includes `source_config_json` and `refresh_config_json`. Use these when source adapters and refresh configuration arrive unless a future requirement clearly justifies typed relational columns and another migration.
+## Historical Board CI knowledge
+
+PR #12 initially exposed Rust `E0597` in `src-tauri/src/db/widgets.rs`: returning a `query_map(...).collect()` tail expression kept the mapped-row temporary alive too long relative to the prepared statement. Binding the collected `Vec` to a local value fixed it (`c970d1a1a7d51f470f9051a1cfcdeeea25aa383e`). A following Actions run failed at startup with zero jobs, but a later normal run passed fully; treat zero-job `startup_failure` separately from code failures.
+
+Board drag/resize updates the DOM during pointer movement and persists geometry only once at gesture end. Keep that behavior.
+
+## CI follow-up
+
+Issue #15 tracks missing `Cargo.lock` / repeated Rust dependency resolution and possible conservative CI caching. Keep that separate from Issue #3 unless it becomes a blocker.
 
 ## Repository-memory protocol
 
@@ -69,11 +63,9 @@ Schema v2 already includes `source_config_json` and `refresh_config_json`. Use t
 
 Meta tracking issue: #13.
 
-When reusable knowledge would otherwise exist only in chat, update the appropriate GitHub document in the same feature batch.
-
 ## Restart checklist
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Inspect the open PR/Issues named above.
-3. Verify current CI state before changing or merging an active branch.
-4. Update this file when the true restart point changes.
+2. Inspect Issue #3 and the active PR/branch for it.
+3. Verify CI state before merging.
+4. Update this file whenever the true restart point changes.

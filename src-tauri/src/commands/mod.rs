@@ -151,7 +151,9 @@ pub(crate) fn set_global_shortcut(
             message.push_str(&format!("; failed to remove new binding: {rollback_error}"));
         }
         if let Some(rollback_error) = restore_old_error {
-            message.push_str(&format!("; failed to restore previous binding: {rollback_error}"));
+            message.push_str(&format!(
+                "; failed to restore previous binding: {rollback_error}"
+            ));
         }
         return Err(message);
     }
@@ -322,7 +324,10 @@ mod tests {
 
     #[test]
     fn shortcut_normalization_is_bounded_and_trimmed() {
-        assert_eq!(normalize_shortcut("  Ctrl+Shift+K  ").unwrap(), "Ctrl+Shift+K");
+        assert_eq!(
+            normalize_shortcut("  Ctrl+Shift+K  ").unwrap(),
+            "Ctrl+Shift+K"
+        );
         assert!(normalize_shortcut("   ").is_err());
         assert!(normalize_shortcut(&"x".repeat(MAX_SHORTCUT_LENGTH + 1)).is_err());
     }

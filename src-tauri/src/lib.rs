@@ -44,7 +44,7 @@ pub fn run() {
                     Err(_) => eprintln!(
                         "global shortcut registration failed and shell state lock was poisoned"
                     ),
-                }
+                };
             }
 
             if let Err(error) = app::apply_current_view(app.handle()) {

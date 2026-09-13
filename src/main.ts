@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./styles.css";
+import "./cache-ui.css";
 
 type ViewState = "hidden" | "idle" | "compact" | "board";
 type ViewEvent = "globalToggle" | "clickIdleOrb" | "openBoard" | "hide";
@@ -23,7 +24,31 @@ type WidgetLayout = {
   displayMode: string;
 };
 
+type CachedItem = {
+  id: string;
+  sourceKind: string;
+  sourceConfigJson: string;
+  externalUrl: string;
+  title: string | null;
+  imageUrl: string | null;
+  author: string | null;
+  publishedAt: number | null;
+  fetchedAt: number;
+  score: number;
+  isUnseen: boolean;
+};
+
+type RefreshSettings = {
+  autoIntervalSeconds: number | null;
+};
+
 type Point = { x: number; y: number };
+
+type SourceGroup = {
+  sourceKind: string;
+  sourceConfigJson: string;
+  widgetIds: number[];
+};
 
 const SOURCE_LABELS: Record<string, string> = {
   youtube: "YouTube",
@@ -39,6 +64,11 @@ const DEFAULT_WIDGET_HEIGHT = 180;
 const MIN_WIDGET_WIDTH = 140;
 const MIN_WIDGET_HEIGHT = 96;
 const DEFAULT_GLOBAL_SHORTCUT = "CmdOrCtrl+Shift+Space";
+const COMPACT_CACHE_LIMIT = 3;
+const BOARD_CACHE_LIMIT = 3;
+const REFRESH_SLIDER_MAX = 100;
+const MIN_AUTO_REFRESH_SECONDS = 5 * 60;
+const MAX_AUTO_REFRESH_SECONDS = 24 * 60 * 60;
 
 function getAppRoot(): HTMLElement {
   const element = document.querySelector<HTMLElement>("#app");
@@ -57,9 +87,13 @@ let shellStatus: ShellStatus = {
 };
 let boardWidgets: WidgetLayout[] = [];
 let boardLoaded = false;
+let boardHydrationGeneration = 0;
 let addPoint: Point | null = null;
 let shortcutPopoverOpen = false;
 let shortcutFormError: string | null = null;
+let refreshPopoverOpen = false;
+let refreshSettings: RefreshSettings | null = null;
+let refreshFormError: string | null = null;
 
 function render(): void {
   document.documentElement.dataset.view = currentView;
@@ -109,31 +143,20 @@ function renderCompact(): void {
         <button class="icon-button" data-action="board" type="button" aria-label="Open Board">▦</button>
         <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle">×</button>
       </header>
-
-      <section class="compact-feed" aria-label="Prototype content">
-        <button class="content-card content-card--visual" data-url="https://www.youtube.com/" type="button">
-          <span class="content-card__source">YouTube</span>
-          <span class="content-card__media content-card__media--youtube" aria-hidden="true"></span>
-          <span class="content-card__hint">prototype · one click</span>
-        </button>
-
-        <button class="content-card content-card--text" data-url="https://arxiv.org/" type="button">
-          <span class="content-card__source">arXiv</span>
-          <strong>Interesting paper goes here.</strong>
-          <span class="content-card__hint">prototype · one click</span>
-        </button>
-      </section>
+      <section class="compact-feed" data-count="0" aria-label="Cached discovery items"></section>
     </main>
   `;
 
   document.querySelector('[data-action="board"]')?.addEventListener("click", () => {
     shortcutPopoverOpen = false;
+    refreshPopoverOpen = false;
     void transitionView("openBoard");
   });
 
   document.querySelector('[data-action="shortcut-settings"]')?.addEventListener("click", () => {
     shortcutPopoverOpen = true;
     shortcutFormError = shellStatus.globalShortcutError;
+    refreshPopoverOpen = false;
     void transitionView("openBoard");
   });
 
@@ -141,26 +164,118 @@ function renderCompact(): void {
     void transitionView("globalToggle");
   });
 
-  for (const card of document.querySelectorAll<HTMLElement>("[data-url]")) {
-    card.addEventListener("click", () => {
-      const url = card.dataset.url;
-      if (url) {
-        void openContent(url);
-      }
-    });
+  void loadCompactItems();
+}
+
+async function loadCompactItems(): Promise<void> {
+  const feed = document.querySelector<HTMLElement>(".compact-feed");
+  if (!feed) {
+    return;
+  }
+
+  feed.setAttribute("aria-busy", "true");
+  feed.replaceChildren(createStatusElement("Loading cached content…"));
+
+  try {
+    const items = await invoke<CachedItem[]>("list_cached_items", { limit: COMPACT_CACHE_LIMIT });
+    if (currentView !== "compact" || !feed.isConnected) {
+      return;
+    }
+
+    renderCompactItems(feed, items);
+    feed.removeAttribute("aria-busy");
+
+    if (items.length > 0) {
+      const previous = shellStatus;
+      shellStatus = await invoke<ShellStatus>("mark_cached_items_seen", {
+        ids: items.map((item) => item.id),
+      });
+      applyShellStatusToVisibleUi(previous);
+    }
+  } catch (error) {
+    if (currentView === "compact" && feed.isConnected) {
+      feed.dataset.count = "0";
+      feed.removeAttribute("aria-busy");
+      feed.replaceChildren(createStatusElement("Cached content is unavailable."));
+    }
+    console.error("failed to load compact cache", error);
   }
 }
 
+function renderCompactItems(feed: HTMLElement, items: CachedItem[]): void {
+  feed.dataset.count = String(items.length);
+  feed.replaceChildren();
+
+  if (items.length === 0) {
+    feed.append(createStatusElement("Nothing cached yet."));
+    return;
+  }
+
+  for (const item of items) {
+    feed.append(createCompactItem(item));
+  }
+}
+
+function createCompactItem(item: CachedItem): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `content-card content-card--cached content-card--${item.sourceKind}`;
+  button.setAttribute("aria-label", `${sourceLabel(item.sourceKind)}: ${item.title ?? "Open content"}`);
+
+  if (item.imageUrl) {
+    button.classList.add("content-card--has-image");
+    const image = document.createElement("img");
+    image.className = "content-card__image";
+    image.alt = "";
+    image.decoding = "async";
+    image.src = item.imageUrl;
+    image.addEventListener("error", () => {
+      image.remove();
+      button.classList.remove("content-card--has-image");
+    });
+    button.append(image);
+  }
+
+  const source = document.createElement("span");
+  source.className = "content-card__source";
+  source.textContent = sourceLabel(item.sourceKind);
+  button.append(source);
+
+  const body = document.createElement("span");
+  body.className = "content-card__body";
+
+  const title = document.createElement("strong");
+  title.className = "content-card__title";
+  title.textContent = item.title ?? sourceLabel(item.sourceKind);
+  body.append(title);
+
+  if (item.author) {
+    const meta = document.createElement("span");
+    meta.className = "content-card__meta";
+    meta.textContent = item.author;
+    body.append(meta);
+  }
+
+  button.append(body);
+  button.addEventListener("click", () => {
+    void openContent(item.externalUrl);
+  });
+  return button;
+}
+
 function renderBoard(): void {
+  const generation = ++boardHydrationGeneration;
   const widgetMarkup = boardWidgets.map(renderWidgetMarkup).join("");
   const pickerMarkup = addPoint ? renderAddPickerMarkup(addPoint) : "";
   const shortcutPopoverMarkup = shortcutPopoverOpen ? renderShortcutPopoverMarkup() : "";
+  const refreshPopoverMarkup = refreshPopoverOpen ? renderRefreshPopoverMarkup() : "";
 
   root.innerHTML = `
     <main class="board-shell">
       <header class="board-toolbar">
         <strong>Board</strong>
         <span class="board-toolbar__hint">Click empty space to add · drag to move</span>
+        <button class="icon-button" data-action="refresh-settings" type="button" aria-label="Refresh settings">↻</button>
         <button class="icon-button" data-action="shortcut-settings" type="button" aria-label="Global shortcut settings">⌨</button>
         <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle">×</button>
       </header>
@@ -169,16 +284,29 @@ function renderBoard(): void {
         ${pickerMarkup}
       </section>
       ${shortcutPopoverMarkup}
+      ${refreshPopoverMarkup}
     </main>
   `;
 
   document.querySelector('[data-action="collapse"]')?.addEventListener("click", () => {
     shortcutPopoverOpen = false;
+    refreshPopoverOpen = false;
     void transitionView("globalToggle");
   });
 
   document.querySelector('[data-action="shortcut-settings"]')?.addEventListener("click", () => {
     shortcutPopoverOpen = !shortcutPopoverOpen;
+    shortcutFormError = null;
+    refreshPopoverOpen = false;
+    refreshFormError = null;
+    addPoint = null;
+    renderBoard();
+  });
+
+  document.querySelector('[data-action="refresh-settings"]')?.addEventListener("click", () => {
+    refreshPopoverOpen = !refreshPopoverOpen;
+    refreshFormError = null;
+    shortcutPopoverOpen = false;
     shortcutFormError = null;
     addPoint = null;
     renderBoard();
@@ -204,7 +332,9 @@ function renderBoard(): void {
   });
 
   bindShortcutPopover();
+  bindRefreshPopover();
   bindWidgetInteractions();
+  void hydrateBoardWidgets(generation);
 
   if (!boardLoaded) {
     boardLoaded = true;
@@ -213,7 +343,7 @@ function renderBoard(): void {
 }
 
 function renderWidgetMarkup(widget: WidgetLayout): string {
-  const label = SOURCE_LABELS[widget.sourceKind] ?? "Source";
+  const label = sourceLabel(widget.sourceKind);
   return `
     <article
       class="board-widget board-widget--${widget.sourceKind}"
@@ -224,12 +354,128 @@ function renderWidgetMarkup(widget: WidgetLayout): string {
         <span>${label}</span>
         <button class="board-widget__delete" data-delete-widget type="button" aria-label="Delete ${label}">×</button>
       </div>
-      <div class="board-widget__content" aria-hidden="true">
-        <span class="board-widget__preview">${label}</span>
+      <div class="board-widget__content" data-widget-content aria-label="${label} cached content">
+        <span class="board-widget__empty">Loading cache…</span>
       </div>
       <button class="board-widget__resize" data-resize-handle type="button" aria-label="Resize ${label}"></button>
     </article>
   `;
+}
+
+async function hydrateBoardWidgets(generation: number): Promise<void> {
+  if (boardWidgets.length === 0) {
+    return;
+  }
+
+  const groups = new Map<string, SourceGroup>();
+  for (const widget of boardWidgets) {
+    const key = JSON.stringify([widget.sourceKind, widget.sourceConfigJson]);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.widgetIds.push(widget.id);
+    } else {
+      groups.set(key, {
+        sourceKind: widget.sourceKind,
+        sourceConfigJson: widget.sourceConfigJson,
+        widgetIds: [widget.id],
+      });
+    }
+  }
+
+  await Promise.all(
+    [...groups.values()].map(async (group) => {
+      try {
+        const items = await invoke<CachedItem[]>("list_cached_items_for_source", {
+          sourceKind: group.sourceKind,
+          sourceConfigJson: group.sourceConfigJson,
+          limit: BOARD_CACHE_LIMIT,
+        });
+        if (currentView !== "board" || generation !== boardHydrationGeneration) {
+          return;
+        }
+
+        for (const widgetId of group.widgetIds) {
+          const container = document.querySelector<HTMLElement>(
+            `[data-widget-id="${widgetId}"] [data-widget-content]`,
+          );
+          if (container?.isConnected) {
+            renderBoardCachedItems(container, items, group.sourceKind);
+          }
+        }
+      } catch (error) {
+        if (currentView === "board" && generation === boardHydrationGeneration) {
+          for (const widgetId of group.widgetIds) {
+            const container = document.querySelector<HTMLElement>(
+              `[data-widget-id="${widgetId}"] [data-widget-content]`,
+            );
+            if (container?.isConnected) {
+              container.replaceChildren(createBoardEmpty("Cache unavailable"));
+            }
+          }
+        }
+        console.error(`failed to hydrate ${group.sourceKind} widget cache`, error);
+      }
+    }),
+  );
+}
+
+function renderBoardCachedItems(
+  container: HTMLElement,
+  items: CachedItem[],
+  sourceKind: string,
+): void {
+  container.replaceChildren();
+  if (items.length === 0) {
+    container.append(createBoardEmpty(`No cached ${sourceLabel(sourceKind)} items`));
+    return;
+  }
+
+  for (const item of items) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "board-feed-item";
+    button.setAttribute("aria-label", item.title ?? `Open ${sourceLabel(item.sourceKind)}`);
+
+    if (item.imageUrl) {
+      const image = document.createElement("img");
+      image.className = "board-feed-item__image";
+      image.alt = "";
+      image.loading = "lazy";
+      image.decoding = "async";
+      image.src = item.imageUrl;
+      image.addEventListener("error", () => image.remove());
+      button.append(image);
+    }
+
+    const text = document.createElement("span");
+    text.className = "board-feed-item__text";
+
+    const title = document.createElement("span");
+    title.className = "board-feed-item__title";
+    title.textContent = item.title ?? sourceLabel(item.sourceKind);
+    text.append(title);
+
+    const metaText = item.author ?? (item.sourceKind !== sourceKind ? sourceLabel(item.sourceKind) : null);
+    if (metaText) {
+      const meta = document.createElement("span");
+      meta.className = "board-feed-item__meta";
+      meta.textContent = metaText;
+      text.append(meta);
+    }
+
+    button.append(text);
+    button.addEventListener("click", () => {
+      void openContent(item.externalUrl);
+    });
+    container.append(button);
+  }
+}
+
+function createBoardEmpty(message: string): HTMLSpanElement {
+  const element = document.createElement("span");
+  element.className = "board-widget__empty";
+  element.textContent = message;
+  return element;
 }
 
 function renderAddPickerMarkup(point: Point): string {
@@ -268,6 +514,23 @@ function renderShortcutPopoverMarkup(): string {
   `;
 }
 
+function renderRefreshPopoverMarkup(): string {
+  return `
+    <aside class="refresh-popover" aria-label="Automatic refresh settings">
+      <div class="refresh-popover__header">
+        <strong>Auto refresh</strong>
+        <button data-action="close-refresh-settings" type="button" aria-label="Close refresh settings">×</button>
+      </div>
+      <label class="refresh-popover__control" for="refresh-interval">
+        <input id="refresh-interval" type="range" min="0" max="${REFRESH_SLIDER_MAX}" step="1">
+        <output id="refresh-interval-output" for="refresh-interval">Loading…</output>
+      </label>
+      <p class="refresh-popover__help">Left edge is OFF. The rest scales from 5 min to 24 h, with more room for short intervals.</p>
+      <p id="refresh-error" class="refresh-popover__error" hidden></p>
+    </aside>
+  `;
+}
+
 function bindShortcutPopover(): void {
   if (!shortcutPopoverOpen) {
     return;
@@ -302,6 +565,155 @@ function bindShortcutPopover(): void {
   input.select();
 }
 
+function bindRefreshPopover(): void {
+  if (!refreshPopoverOpen) {
+    return;
+  }
+
+  const slider = document.querySelector<HTMLInputElement>("#refresh-interval");
+  const output = document.querySelector<HTMLOutputElement>("#refresh-interval-output");
+  const errorElement = document.querySelector<HTMLElement>("#refresh-error");
+  if (!slider || !output || !errorElement) {
+    return;
+  }
+
+  document.querySelector('[data-action="close-refresh-settings"]')?.addEventListener("click", () => {
+    refreshPopoverOpen = false;
+    refreshFormError = null;
+    renderBoard();
+  });
+
+  slider.addEventListener("input", () => {
+    output.value = formatRefreshInterval(sliderPositionToSeconds(Number(slider.value)));
+  });
+
+  slider.addEventListener("change", () => {
+    void saveAutoRefreshInterval(Number(slider.value), slider, output, errorElement);
+  });
+
+  if (refreshSettings) {
+    setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
+    showRefreshError(errorElement, refreshFormError);
+  } else {
+    slider.disabled = true;
+    output.value = "Loading…";
+    void loadRefreshSettings(slider, output, errorElement);
+  }
+}
+
+async function loadRefreshSettings(
+  slider: HTMLInputElement,
+  output: HTMLOutputElement,
+  errorElement: HTMLElement,
+): Promise<void> {
+  try {
+    refreshSettings = await invoke<RefreshSettings>("get_refresh_settings");
+    if (!refreshPopoverOpen || !slider.isConnected) {
+      return;
+    }
+    setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
+    slider.disabled = false;
+    showRefreshError(errorElement, refreshFormError);
+  } catch (error) {
+    if (refreshPopoverOpen && slider.isConnected) {
+      slider.disabled = true;
+      output.value = "Unavailable";
+      showRefreshError(errorElement, getErrorMessage(error));
+    }
+    console.error("failed to load refresh settings", error);
+  }
+}
+
+async function saveAutoRefreshInterval(
+  sliderPosition: number,
+  slider: HTMLInputElement,
+  output: HTMLOutputElement,
+  errorElement: HTMLElement,
+): Promise<void> {
+  const autoIntervalSeconds = sliderPositionToSeconds(sliderPosition);
+  slider.disabled = true;
+  refreshFormError = null;
+  showRefreshError(errorElement, null);
+
+  try {
+    refreshSettings = await invoke<RefreshSettings>("set_auto_refresh_interval", {
+      autoIntervalSeconds,
+    });
+    if (!refreshPopoverOpen || !slider.isConnected) {
+      return;
+    }
+    setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
+  } catch (error) {
+    refreshFormError = getErrorMessage(error);
+    if (refreshPopoverOpen && slider.isConnected) {
+      showRefreshError(errorElement, refreshFormError);
+      if (refreshSettings) {
+        setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
+      }
+    }
+    console.error("failed to save refresh interval", error);
+  } finally {
+    if (refreshPopoverOpen && slider.isConnected) {
+      slider.disabled = false;
+    }
+  }
+}
+
+function setRefreshControls(
+  slider: HTMLInputElement,
+  output: HTMLOutputElement,
+  seconds: number | null,
+): void {
+  slider.value = String(secondsToSliderPosition(seconds));
+  output.value = formatRefreshInterval(seconds);
+}
+
+function showRefreshError(element: HTMLElement, message: string | null): void {
+  element.textContent = message ?? "";
+  element.hidden = !message;
+}
+
+function sliderPositionToSeconds(position: number): number | null {
+  const normalizedPosition = clamp(Math.round(position), 0, REFRESH_SLIDER_MAX);
+  if (normalizedPosition === 0) {
+    return null;
+  }
+
+  const fraction = (normalizedPosition - 1) / (REFRESH_SLIDER_MAX - 1);
+  const rawSeconds =
+    MIN_AUTO_REFRESH_SECONDS *
+    Math.pow(MAX_AUTO_REFRESH_SECONDS / MIN_AUTO_REFRESH_SECONDS, fraction);
+  const roundedToMinute = Math.round(rawSeconds / 60) * 60;
+  return clamp(roundedToMinute, MIN_AUTO_REFRESH_SECONDS, MAX_AUTO_REFRESH_SECONDS);
+}
+
+function secondsToSliderPosition(seconds: number | null): number {
+  if (seconds === null) {
+    return 0;
+  }
+
+  const bounded = clamp(seconds, MIN_AUTO_REFRESH_SECONDS, MAX_AUTO_REFRESH_SECONDS);
+  const fraction =
+    Math.log(bounded / MIN_AUTO_REFRESH_SECONDS) /
+    Math.log(MAX_AUTO_REFRESH_SECONDS / MIN_AUTO_REFRESH_SECONDS);
+  return clamp(Math.round(1 + fraction * (REFRESH_SLIDER_MAX - 1)), 1, REFRESH_SLIDER_MAX);
+}
+
+function formatRefreshInterval(seconds: number | null): string {
+  if (seconds === null) {
+    return "OFF";
+  }
+  if (seconds < 60 * 60) {
+    return `${Math.round(seconds / 60)} min`;
+  }
+
+  const hours = seconds / (60 * 60);
+  if (hours < 10 && Math.abs(hours - Math.round(hours)) > 0.05) {
+    return `${hours.toFixed(1)} h`;
+  }
+  return `${Math.round(hours)} h`;
+}
+
 function handleBoardPointerDown(event: PointerEvent): void {
   const canvas = event.currentTarget as HTMLElement;
   if (event.target !== canvas) {
@@ -314,6 +726,8 @@ function handleBoardPointerDown(event: PointerEvent): void {
   addPoint = { x: Math.round(x), y: Math.round(y) };
   shortcutPopoverOpen = false;
   shortcutFormError = null;
+  refreshPopoverOpen = false;
+  refreshFormError = null;
   renderBoard();
 }
 
@@ -513,10 +927,44 @@ async function transitionView(event: ViewEvent): Promise<void> {
 
 async function openContent(url: string): Promise<void> {
   try {
+    const previousView = currentView;
     currentView = await invoke<ViewState>("open_content", { url });
-    render();
+    if (currentView !== previousView) {
+      render();
+    }
   } catch (error) {
     console.error("content launch failed", error);
+  }
+}
+
+function applyShellStatusToVisibleUi(previous: ShellStatus): void {
+  if (currentView === "idle") {
+    const badge = document.querySelector<HTMLElement>(".idle-orb__badge");
+    if (badge) {
+      badge.hidden = !shellStatus.hasUnseen;
+    }
+    return;
+  }
+
+  if (
+    currentView === "compact" &&
+    previous.globalShortcutError !== shellStatus.globalShortcutError
+  ) {
+    renderCompact();
+    return;
+  }
+
+  if (currentView === "board" && shortcutPopoverOpen) {
+    const input = document.querySelector<HTMLInputElement>("#shortcut-input");
+    const errorElement = document.querySelector<HTMLElement>("#shortcut-error");
+    if (input && document.activeElement !== input) {
+      input.value = shellStatus.globalShortcut;
+    }
+    if (errorElement) {
+      const message = shortcutFormError ?? shellStatus.globalShortcutError;
+      errorElement.textContent = message ?? "";
+      errorElement.hidden = !message;
+    }
   }
 }
 
@@ -527,8 +975,9 @@ async function boot(): Promise<void> {
   });
 
   await listen<ShellStatus>("shell-status-changed", (event) => {
+    const previous = shellStatus;
     shellStatus = event.payload;
-    render();
+    applyShellStatusToVisibleUi(previous);
   });
 
   try {
@@ -544,6 +993,17 @@ async function boot(): Promise<void> {
   }
 
   render();
+}
+
+function createStatusElement(message: string): HTMLDivElement {
+  const element = document.createElement("div");
+  element.className = "feed-status";
+  element.textContent = message;
+  return element;
+}
+
+function sourceLabel(sourceKind: string): string {
+  return SOURCE_LABELS[sourceKind] ?? "Source";
 }
 
 function getErrorMessage(error: unknown): string {

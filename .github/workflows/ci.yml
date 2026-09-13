@@ -36,7 +36,7 @@ jobs:
         run: python3 -m py_compile scripts/measure_idle_linux.py
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Frontend build
         run: npm run build

@@ -6,6 +6,8 @@ use serde::Serialize;
 pub(crate) struct WidgetLayout {
     pub(crate) id: i64,
     pub(crate) source_kind: String,
+    pub(crate) source_config_json: String,
+    pub(crate) refresh_config_json: String,
     pub(crate) x: f64,
     pub(crate) y: f64,
     pub(crate) width: f64,
@@ -15,7 +17,7 @@ pub(crate) struct WidgetLayout {
 
 pub(crate) fn list(connection: &Connection) -> Result<Vec<WidgetLayout>> {
     let mut statement = connection.prepare(
-        "SELECT id, source_kind, x, y, width, height, display_mode\n         FROM widgets\n         ORDER BY id",
+        "SELECT id, source_kind, source_config_json, refresh_config_json, x, y, width, height, display_mode\n         FROM widgets\n         ORDER BY id",
     )?;
 
     statement
@@ -23,11 +25,13 @@ pub(crate) fn list(connection: &Connection) -> Result<Vec<WidgetLayout>> {
             Ok(WidgetLayout {
                 id: row.get(0)?,
                 source_kind: row.get(1)?,
-                x: row.get(2)?,
-                y: row.get(3)?,
-                width: row.get(4)?,
-                height: row.get(5)?,
-                display_mode: row.get(6)?,
+                source_config_json: row.get(2)?,
+                refresh_config_json: row.get(3)?,
+                x: row.get(4)?,
+                y: row.get(5)?,
+                width: row.get(6)?,
+                height: row.get(7)?,
+                display_mode: row.get(8)?,
             })
         })?
         .collect()
@@ -49,6 +53,8 @@ pub(crate) fn create(
     Ok(WidgetLayout {
         id: connection.last_insert_rowid(),
         source_kind: source_kind.to_owned(),
+        source_config_json: "{}".to_owned(),
+        refresh_config_json: "{}".to_owned(),
         x,
         y,
         width,
@@ -88,6 +94,8 @@ mod tests {
 
         let widget = create(&connection, "youtube", 12.0, 18.0, 280.0, 180.0)
             .expect("widget should be created");
+        assert_eq!(widget.source_config_json, "{}");
+        assert_eq!(widget.refresh_config_json, "{}");
         assert!(update_geometry(
             &connection,
             widget.id,
@@ -102,6 +110,8 @@ mod tests {
         assert_eq!(widgets.len(), 1);
         assert_eq!(widgets[0].x, 40.0);
         assert_eq!(widgets[0].height, 210.0);
+        assert_eq!(widgets[0].source_config_json, "{}");
+        assert_eq!(widgets[0].refresh_config_json, "{}");
 
         assert!(delete(&connection, widget.id).expect("widget should delete"));
         assert!(list(&connection).expect("widgets should list").is_empty());

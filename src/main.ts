@@ -8,6 +8,8 @@ type ViewEvent = "globalToggle" | "clickIdleOrb" | "openBoard" | "hide";
 type WidgetLayout = {
   id: number;
   sourceKind: string;
+  sourceConfigJson: string;
+  refreshConfigJson: string;
   x: number;
   y: number;
   width: number;
@@ -343,11 +345,23 @@ async function loadBoardWidgets(): Promise<void> {
 }
 
 async function addBoardWidget(sourceKind: string, point: Point): Promise<void> {
+  const canvas = document.querySelector<HTMLElement>(".board-canvas");
+  const availableWidth = canvas ? Math.max(0, canvas.clientWidth - point.x) : DEFAULT_WIDGET_WIDTH;
+  const availableHeight = canvas ? Math.max(0, canvas.clientHeight - point.y) : DEFAULT_WIDGET_HEIGHT;
+  const width = clamp(Math.min(DEFAULT_WIDGET_WIDTH, availableWidth), MIN_WIDGET_WIDTH, DEFAULT_WIDGET_WIDTH);
+  const height = clamp(
+    Math.min(DEFAULT_WIDGET_HEIGHT, availableHeight),
+    MIN_WIDGET_HEIGHT,
+    DEFAULT_WIDGET_HEIGHT,
+  );
+
   try {
     const widget = await invoke<WidgetLayout>("add_widget", {
       sourceKind,
       x: point.x,
       y: point.y,
+      width,
+      height,
     });
     boardWidgets.push(widget);
     addPoint = null;

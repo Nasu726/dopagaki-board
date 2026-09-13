@@ -8,12 +8,12 @@ pub(crate) fn run(connection: &Connection) -> Result<()> {
     match version {
         0 => {
             connection.execute_batch(
-                "BEGIN IMMEDIATE;\n                 CREATE TABLE settings (\n                   key TEXT PRIMARY KEY NOT NULL,\n                   value TEXT NOT NULL\n                 );\n                 CREATE TABLE widgets (\n                   id INTEGER PRIMARY KEY AUTOINCREMENT,\n                   source_kind TEXT NOT NULL,\n                   x REAL NOT NULL,\n                   y REAL NOT NULL,\n                   width REAL NOT NULL CHECK(width > 0),\n                   height REAL NOT NULL CHECK(height > 0),\n                   display_mode TEXT NOT NULL DEFAULT 'minimal'\n                 );\n                 PRAGMA user_version = 2;\n                 COMMIT;",
+                "BEGIN IMMEDIATE;\n                 CREATE TABLE settings (\n                   key TEXT PRIMARY KEY NOT NULL,\n                   value TEXT NOT NULL\n                 );\n                 CREATE TABLE widgets (\n                   id INTEGER PRIMARY KEY AUTOINCREMENT,\n                   source_kind TEXT NOT NULL,\n                   source_config_json TEXT NOT NULL DEFAULT '{}',\n                   refresh_config_json TEXT NOT NULL DEFAULT '{}',\n                   x REAL NOT NULL,\n                   y REAL NOT NULL,\n                   width REAL NOT NULL CHECK(width > 0),\n                   height REAL NOT NULL CHECK(height > 0),\n                   display_mode TEXT NOT NULL DEFAULT 'minimal'\n                 );\n                 PRAGMA user_version = 2;\n                 COMMIT;",
             )?;
         }
         1 => {
             connection.execute_batch(
-                "BEGIN IMMEDIATE;\n                 CREATE TABLE widgets (\n                   id INTEGER PRIMARY KEY AUTOINCREMENT,\n                   source_kind TEXT NOT NULL,\n                   x REAL NOT NULL,\n                   y REAL NOT NULL,\n                   width REAL NOT NULL CHECK(width > 0),\n                   height REAL NOT NULL CHECK(height > 0),\n                   display_mode TEXT NOT NULL DEFAULT 'minimal'\n                 );\n                 PRAGMA user_version = 2;\n                 COMMIT;",
+                "BEGIN IMMEDIATE;\n                 CREATE TABLE widgets (\n                   id INTEGER PRIMARY KEY AUTOINCREMENT,\n                   source_kind TEXT NOT NULL,\n                   source_config_json TEXT NOT NULL DEFAULT '{}',\n                   refresh_config_json TEXT NOT NULL DEFAULT '{}',\n                   x REAL NOT NULL,\n                   y REAL NOT NULL,\n                   width REAL NOT NULL CHECK(width > 0),\n                   height REAL NOT NULL CHECK(height > 0),\n                   display_mode TEXT NOT NULL DEFAULT 'minimal'\n                 );\n                 PRAGMA user_version = 2;\n                 COMMIT;",
             )?;
         }
         CURRENT_SCHEMA_VERSION => {}

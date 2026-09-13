@@ -7,12 +7,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
-const DEFAULT_WIDGET_WIDTH: f64 = 280.0;
-const DEFAULT_WIDGET_HEIGHT: f64 = 180.0;
 const MIN_WIDGET_WIDTH: f64 = 140.0;
 const MIN_WIDGET_HEIGHT: f64 = 96.0;
 const MAX_WIDGET_SIZE: f64 = 4096.0;
-const SOURCE_KINDS: &[&str] = &["youtube", "arxiv", "wikipedia", "nhk", "qiita", "zenn"];
+const MAX_WIDGET_POSITION: f64 = 65_536.0;
+const SOURCE_KINDS: &[&str] = &[
+    "youtube",
+    "arxiv",
+    "wikipedia",
+    "nhk",
+    "qiita",
+    "zenn",
+];
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,10 +59,7 @@ pub(crate) fn get_view_state(app: AppHandle) -> Result<ViewState, String> {
 }
 
 #[tauri::command]
-pub(crate) fn transition_view(
-    event: ViewEvent,
-    app: AppHandle,
-) -> Result<ViewState, String> {
+pub(crate) fn transition_view(event: ViewEvent, app: AppHandle) -> Result<ViewState, String> {
     app::transition_view(&app, event)
 }
 
@@ -87,24 +90,20 @@ pub(crate) fn add_widget(
     source_kind: String,
     x: f64,
     y: f64,
+    width: f64,
+    height: f64,
     state: State<'_, AppState>,
 ) -> Result<WidgetLayout, String> {
     validate_source_kind(&source_kind)?;
     validate_position(x, y)?;
+    validate_size(width, height)?;
 
     let connection = state
         .db
         .lock()
         .map_err(|_| "database lock was poisoned".to_owned())?;
-    db::widgets::create(
-        &connection,
-        &source_kind,
-        x,
-        y,
-        DEFAULT_WIDGET_WIDTH,
-        DEFAULT_WIDGET_HEIGHT,
-    )
-    .map_err(|error| format!("failed to create widget: {error}"))
+    db::widgets::create(&connection, &source_kind, x, y, width, height)
+        .map_err(|error| format!("failed to create widget: {error}"))
 }
 
 #[tauri::command]
@@ -161,10 +160,14 @@ fn validate_source_kind(source_kind: &str) -> Result<(), String> {
 }
 
 fn validate_position(x: f64, y: f64) -> Result<(), String> {
-    if x.is_finite() && y.is_finite() && x >= 0.0 && y >= 0.0 {
+    let valid = x.is_finite()
+        && y.is_finite()
+        && (0.0..=MAX_WIDGET_POSITION).contains(&x)
+        && (0.0..=MAX_WIDGET_POSITION).contains(&y);
+    if valid {
         Ok(())
     } else {
-        Err("widget position must be finite and non-negative".to_owned())
+        Err("widget position is outside the supported range".to_owned())
     }
 }
 
@@ -194,6 +197,7 @@ mod tests {
     fn geometry_validation_rejects_invalid_values() {
         assert!(validate_position(0.0, 0.0).is_ok());
         assert!(validate_position(-1.0, 0.0).is_err());
+        assert!(validate_position(MAX_WIDGET_POSITION + 1.0, 0.0).is_err());
         assert!(validate_position(f64::NAN, 0.0).is_err());
         assert!(validate_size(280.0, 180.0).is_ok());
         assert!(validate_size(80.0, 180.0).is_err());

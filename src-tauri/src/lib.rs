@@ -18,7 +18,11 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::bootstrap_probe])
+        .invoke_handler(tauri::generate_handler![
+            commands::bootstrap_probe,
+            commands::get_view_state,
+            commands::transition_view,
+        ])
         .run(tauri::generate_context!())
         .expect("failed to run dopagaki-board");
 }

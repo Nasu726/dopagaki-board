@@ -32,6 +32,9 @@ mod tests {
             effective_auto_interval("arxiv", Some(ARXIV_AUTO_REFRESH_SECONDS)),
             Some(ARXIV_AUTO_REFRESH_SECONDS)
         );
-        assert_eq!(effective_auto_interval("youtube", Some(5 * 60)), Some(5 * 60));
+        assert_eq!(
+            effective_auto_interval("youtube", Some(5 * 60)),
+            Some(5 * 60)
+        );
     }
 }

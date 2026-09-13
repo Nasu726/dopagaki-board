@@ -15,32 +15,30 @@ Merged to `main`:
 - PR #19: cache-first SQLite data layer + deterministic scheduler core
 - PR #22: cache-driven Compact/Board presentation + automatic-refresh slider
 - PR #24: schema-v4 source-scoped cache identity + canonical source configuration
+- PR #26: event/deadline-driven refresh runtime + first real arXiv adapter
+
+Issue #21 closed with PR #26 after Linux, Windows, and macOS all passed frontend build, Rust tests/check, and Tauri release build.
 
 PR #23 was a duplicate frontend implementation created during an overlapping development stream and was closed after #22 had already merged. Do not revive it.
 
-Active product branch: `feat-runtime-arxiv`.
-Active product PR: #26.
-Current work: Issue #21, event/deadline-driven runtime coordinator + first real arXiv adapter.
+The repository is now public. This removes the private-repository GitHub Actions minute quota as the immediate constraint for standard GitHub-hosted runners, but CI latency and reproducibility still matter.
 
-PR #26 currently implements:
+Current maintenance branch: `ci-lockfile-reproducible`.
+Current work: Issue #15, commit a current `src-tauri/Cargo.lock` and enforce locked Rust CI.
 
-1. background coordination via `tokio::sync::Notify` plus scheduler deadlines, with no high-frequency polling loop
-2. strict scheduler-lock separation from SQLite and HTTP I/O
-3. restored/persisted `last_attempt`, `last_success`, failure count, and `blocked_until`
-4. first async arXiv Atom adapter using `reqwest` + `quick-xml`
-5. one serialized arXiv request gate with at least 3 seconds between request starts
-6. arXiv automatic-refresh clamp of 24 hours, while manual refresh remains possible with auto OFF
-7. source-scoped cache upserts using schema-v4 identity `(source_kind, canonical source_config_json, id)`
-8. global seen-state propagation when the same external item appears under another source config
-9. narrow `cache-changed` events: Compact reloads only its small feed surface; Board rehydrates only affected widgets; Hidden/Idle do no feed DOM/media work
-10. a manual refresh control for arXiv Board widgets
-11. deterministic scheduler, cache, refresh-state, and Atom-normalization tests
+The previous PR #25/branch `ci-lockfile-bootstrap` was moved to Draft after PR #26 added `reqwest`, `quick-xml`, and `tokio`; its generated lockfile became stale. A fresh branch was created from post-#26 `main`. A temporary push-only workflow generated a new Cargo.lock from the current dependency graph, committed it, and was removed immediately afterward. The current branch now changes the three OS workflows to verify `cargo metadata --locked` and run `cargo test` / `cargo check` with `--locked`.
 
-PR #26 was deliberately cleaned after PR #24 merged: its branch now has a clean parent at current `main`, rather than carrying the unsquashed #24 history. Keep it that way.
-
-Independent maintenance PR #25 (`ci-lockfile-bootstrap`) contains `src-tauri/Cargo.lock` and changes the three OS workflows to use `--locked`. **Do not merge #25 before the dependency-changing runtime slice is settled unless its lockfile is regenerated for PR #26's new dependencies (`reqwest`, `quick-xml`, `tokio`).** After #26 merges, refresh/rebase #25 and regenerate the lockfile before merging it.
+Do not mix Rust build-cache experimentation into the lockfile/reproducibility slice. Caching remains a separate measured follow-up.
 
 Issue #3 is closed in GitHub, but `docs/PERF_BASELINE.md` still correctly records the real desktop Idle CPU/RSS baseline as pending. Do not claim a measured baseline until actual release-build numbers are recorded there. Issue #6 owns the broader performance-budget/refactor discipline.
+
+## Public repository / ruleset note
+
+The repository visibility changed from private to public on 2026-09-14 after the account approached its private GitHub Actions minute quota.
+
+A ruleset named `main protection` is active. At the time of inspection its branch condition was `~ALL`, with deletion and non-fast-forward updates blocked. That means the current ruleset applies those protections to every branch, not only `main`. Normal feature-branch commits still work, but branch deletion/force-rewrite may be affected. If the intent is strictly main-only protection, narrow the ruleset target in GitHub settings later.
+
+Treat repository/GitHub state as authoritative if chat or this file ever appears stale after an interrupted stream.
 
 ## CI working rule
 
@@ -51,19 +49,17 @@ Windows/macOS cold CI can take tens of minutes. Do not spend an active developme
 - investigate failures; never weaken platform checks to shorten the wait
 - require Linux, Windows, and macOS release-build CI green for merge candidates
 
-This rule exists because an earlier session spent roughly twenty minutes waiting for CI, the stream disconnected, and a restarted instruction stream overlapped when the original stream later resumed. Repository state, not stale chat/handoff text, is authoritative after such an interruption.
+An earlier session spent roughly twenty minutes waiting for CI, the stream disconnected, and a restarted instruction stream overlapped when the original later resumed. Inspect actual PR/branch/workflow state before continuing after an interruption.
 
 ## Branch hygiene
 
-Prefer `main + one active product branch`, with another branch only for genuinely independent maintenance.
+Prefer `main + one active product or maintenance branch`, with a second branch only for genuinely independent work.
 
-- after a feature PR is merged or superseded, delete its branch when tooling permits
+- after a PR is merged or superseded, delete its branch when tooling/rulesets permit
 - do not reuse obsolete branches for unrelated work
-- branch product work from current `main`
+- branch new work from current `main`
 - if an overlapping stream creates duplicate work, inspect actual merged/open PR state before continuing
-- if a feature branch inherited already-merged unsquashed history, rebuild/clean its ancestry before review rather than leaving a noisy PR
-
-Known obsolete/superseded branches include older bootstrap/Board/Idle/cache-UI branches. Do not base new work on them.
+- if a branch inherited already-merged unsquashed history, rebuild cleanly rather than leaving a noisy PR
 
 ## Cross-platform CI knowledge
 
@@ -134,9 +130,9 @@ Current scheduler invariants:
 - failures back off exponentially from 60 s, capped at 6 h
 - blocked work cannot execute before `blocked_until`
 - persisted success/failure state is restored after restart
-- scheduler can expose its next meaningful wakeup deadline
+- scheduler exposes its next meaningful wakeup deadline
 
-`src-tauri/src/runtime.rs` owns integration. The central locking invariant is:
+`src-tauri/src/runtime.rs` owns integration. Central locking invariant:
 
 **Never hold the scheduler mutex across SQLite or HTTP I/O.**
 
@@ -160,7 +156,7 @@ Preserve these source-specific constraints recorded on Issue #21:
 
 - legacy API response: Atom
 - `sortBy=submittedDate`, descending
-- one connection at a time
+- one request at a time
 - at least 3 seconds between request starts
 - automatic refresh clamp: 24 h
 - manual refresh can still be requested while automatic refresh is OFF, but respects scheduler backoff and the arXiv request gate
@@ -172,18 +168,16 @@ Current default config `{}` means arXiv query `cat:cs.AI` with a bounded result 
 
 Startup remains cache-first. `runtime::start` constructs clients/spawns the coordinator after SQLite/cache initialization but does not await network completion.
 
-PR #22 established the narrow cache presentation boundary; PR #26 extends it with runtime events:
-
-- Compact reads only the top cached items when visible
+- Compact reads only top cached items when visible
 - Board reads only source/config pairs represented by widgets
 - `cache-changed` carries source kind, canonical config, and affected widget ids
 - Compact silently reloads its small feed after a cache change
 - Board rehydrates only affected widget content nodes
 - Idle/Hidden perform no feed DOM/layout/media work
 - shell unseen badge remains Rust-owned
-- never respond to background freshness by rebuilding the whole Board
+- never rebuild the whole Board merely because background freshness changed
 
-Manual refresh is currently exposed only where an actual adapter exists (arXiv). The button enqueues work; the scheduler/request gate owns deduplication and cooldown behavior.
+Manual refresh is currently exposed only where an actual adapter exists (arXiv). The button enqueues work; scheduler/backoff/request-gate policy owns actual execution.
 
 ## Tauri command macro boundary
 
@@ -237,17 +231,17 @@ Keep the app in Idle with no interaction during settle/sample. `docs/PERF_BASELI
 
 ## CI reproducibility / Issue #15
 
-PR #25 is the lockfile/reproducibility slice, but its generated lockfile predates PR #26's new Rust dependencies.
+The current clean branch `ci-lockfile-reproducible` is based on post-#26 main.
 
-After the runtime dependency set is final:
+Current slice:
 
-1. regenerate `src-tauri/Cargo.lock`
-2. make PR #25 current with latest `main`
-3. verify `cargo metadata --locked`
-4. run test/check with `--locked` on all three OSes
-5. keep build-cache experimentation separate and measured
+1. a temporary Actions workflow generated `src-tauri/Cargo.lock` from the current dependency graph
+2. the temporary workflow was removed immediately after the lockfile commit
+3. Linux/Windows/macOS CI verify `cargo metadata --locked`
+4. Rust tests/check run with `--locked` on all three OSes
+5. Tauri release build remains unchanged
 
-Do not merge a stale lockfile just because its earlier CI run was green.
+After this slice merges, evaluate build caching separately with before/after timings. Do not conflate dependency reproducibility with cache-speed tuning.
 
 ## Repository-memory protocol
 
@@ -266,9 +260,9 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 ## Restart checklist
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Inspect active PR #26, maintenance PR #25, and Issues #5, #6, #15, #21.
-3. Treat GitHub state as authoritative if chat/handoff appears inconsistent because of an interrupted or overlapping stream.
-4. For PR #26, require frontend build, Rust tests/check, and Tauri release build green on Linux/Windows/macOS; fix failures rather than weakening checks.
-5. Verify the first real arXiv flow still obeys cache-first startup, 24 h auto clamp, serialized >=3 s requests, source-key dedup, persisted backoff, and narrow UI updates.
-6. Merge #26 only when green, then update/regen PR #25's lockfile against the new dependency set.
-7. After runtime + lockfile work, perform the deliberate performance/refactor pass tracked by Issue #6 and run the real release-build Idle baseline when a desktop session is available.
+2. Inspect Issue #15 and the current `ci-lockfile-reproducible` PR/branch plus Issues #5 and #6.
+3. Treat GitHub state as authoritative after an interrupted or overlapping stream.
+4. Require the locked Rust dependency check, tests/check, frontend build, and Tauri release build to pass on Linux/Windows/macOS before merging the reproducibility slice.
+5. Keep build-cache tuning as a separate measured change after the lockfile slice.
+6. Continue product work through Issue #5 after the maintenance slice; the next source adapter should reuse the established scheduler/runtime/cache boundary rather than invent a second framework.
+7. Run the real release-build Idle baseline when a desktop session is available.

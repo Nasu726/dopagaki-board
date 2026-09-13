@@ -149,7 +149,7 @@ impl Scheduler {
             }
         }
 
-        let request = self.pending.remove(best_index?)?;
+        let request = self.pending.remove(best_index?);
         let state = self.sources.get_mut(&request.key)?;
         state.running = true;
         self.running_count += 1;

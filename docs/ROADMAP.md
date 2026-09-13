@@ -7,7 +7,8 @@ Current checkpoint (2026-09-14): **functional MVP first-complete checkpoint reac
 - [x] Create repository
 - [x] Record initial product decisions
 - [x] Split durable docs by concern
-- [ ] Build the first Figma comparison sheet from the approved visual direction
+
+Figma comparison/mock work is intentionally deferred and is not required for the current product direction. Revisit it only if real-use feedback reveals a design problem that is easier to resolve visually before implementation.
 
 ## Phase 1 — smallest runnable shell
 

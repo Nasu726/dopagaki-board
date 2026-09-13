@@ -3,6 +3,7 @@ use crate::{
     app::{AppState, ShellStatus},
     db::{self, cache::CachedItem},
     scheduler::{SourceKey, AUTO_REFRESH_SETTING_KEY, DEFAULT_AUTO_REFRESH_SECONDS},
+    source_config,
 };
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -43,17 +44,18 @@ pub(crate) fn set_auto_refresh_interval(
             .db
             .lock()
             .map_err(|_| "database lock was poisoned".to_owned())?;
+        let source_keys = db::widgets::list(&connection)
+            .map_err(|error| format!("failed to list widget sources: {error}"))?
+            .into_iter()
+            .map(|widget| SourceKey::new(widget.source_kind, widget.source_config_json))
+            .collect::<Result<Vec<_>, _>>()?;
+
         let value = auto_interval_seconds
             .map(|seconds| seconds.to_string())
             .unwrap_or_else(|| "off".to_owned());
         db::set_setting(&connection, AUTO_REFRESH_SETTING_KEY, &value)
             .map_err(|error| format!("failed to persist refresh interval: {error}"))?;
-
-        db::widgets::list(&connection)
-            .map_err(|error| format!("failed to list widget sources: {error}"))?
-            .into_iter()
-            .map(|widget| SourceKey::new(widget.source_kind, widget.source_config_json))
-            .collect::<Vec<_>>()
+        source_keys
     };
 
     let now = unix_seconds()?;
@@ -95,9 +97,7 @@ pub(crate) fn list_cached_items_for_source(
     if source_kind.trim().is_empty() || source_kind.len() > 64 {
         return Err("invalid source kind".to_owned());
     }
-    if source_config_json.len() > 16 * 1024 {
-        return Err("source configuration is too large".to_owned());
-    }
+    let source_config_json = source_config::canonicalize(&source_config_json)?;
 
     let connection = state
         .db

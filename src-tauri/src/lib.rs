@@ -50,6 +50,10 @@ pub fn run() {
             commands::get_view_state,
             commands::transition_view,
             commands::open_content,
+            commands::list_widgets,
+            commands::add_widget,
+            commands::update_widget_geometry,
+            commands::delete_widget,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run dopagaki-board");

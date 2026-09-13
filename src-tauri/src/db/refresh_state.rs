@@ -100,8 +100,7 @@ mod tests {
         assert_eq!(attempted.last_attempt, Some(10));
         assert_eq!(attempted.last_success, None);
 
-        mark_failure(&connection, "arxiv", "{}", 11, 2, Some(131))
-            .expect("failure should persist");
+        mark_failure(&connection, "arxiv", "{}", 11, 2, Some(131)).expect("failure should persist");
         let failed = get(&connection, "arxiv", "{}").expect("failure should read");
         assert_eq!(failed.last_attempt, Some(10));
         assert_eq!(failed.failure_count, 2);

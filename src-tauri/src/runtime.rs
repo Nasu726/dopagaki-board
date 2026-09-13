@@ -46,10 +46,8 @@ pub(crate) fn request_manual_for_widget(id: i64, state: &AppState) -> Result<(),
             .db
             .lock()
             .map_err(|_| "database lock was poisoned".to_owned())?;
-        let widget = db::widgets::list(&connection)
-            .map_err(|error| format!("failed to list widgets: {error}"))?
-            .into_iter()
-            .find(|widget| widget.id == id)
+        let widget = db::widgets::get(&connection, id)
+            .map_err(|error| format!("failed to read widget: {error}"))?
             .ok_or_else(|| "widget was not found".to_owned())?;
 
         if !sources::is_supported(&widget.source_kind) {
@@ -59,7 +57,7 @@ pub(crate) fn request_manual_for_widget(id: i64, state: &AppState) -> Result<(),
             ));
         }
 
-        let key = SourceKey::new(widget.source_kind, widget.source_config_json)?;
+        let key = source_key(widget.source_kind, widget.source_config_json)?;
         let persisted =
             db::refresh_state::get(&connection, &key.source_kind, &key.source_config_json)
                 .map_err(|error| format!("failed to read source refresh state: {error}"))?;
@@ -153,7 +151,7 @@ fn sync_scheduler_sources(app: &AppHandle, now: i64) -> Result<(), String> {
                 continue;
             }
 
-            let key = match SourceKey::new(widget.source_kind.clone(), widget.source_config_json) {
+            let key = match source_key(widget.source_kind.clone(), widget.source_config_json) {
                 Ok(key) => key,
                 Err(error) => {
                     eprintln!(
@@ -377,7 +375,7 @@ fn matching_widget_ids(widgets: &[db::widgets::WidgetLayout], key: &SourceKey) -
     widgets
         .iter()
         .filter_map(|widget| {
-            let widget_key = SourceKey::new(
+            let widget_key = source_key(
                 widget.source_kind.clone(),
                 widget.source_config_json.clone(),
             )
@@ -385,6 +383,11 @@ fn matching_widget_ids(widgets: &[db::widgets::WidgetLayout], key: &SourceKey) -
             (widget_key == *key).then_some(widget.id)
         })
         .collect()
+}
+
+fn source_key(source_kind: String, source_config_json: String) -> Result<SourceKey, String> {
+    let normalized = sources::normalize_config(&source_kind, &source_config_json)?;
+    SourceKey::new(source_kind, normalized)
 }
 
 async fn wait_for_wakeup(app: &AppHandle, deadline: Option<i64>, now: i64) {

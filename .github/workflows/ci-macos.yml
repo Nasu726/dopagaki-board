@@ -14,12 +14,19 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: "./src-tauri -> target"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Frontend build
         run: npm run build

@@ -23,7 +23,7 @@ jobs:
         run: ./scripts/decode_windows_icon.ps1
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Frontend build
         run: npm run build

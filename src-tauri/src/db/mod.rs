@@ -1,4 +1,5 @@
 mod migrations;
+pub(crate) mod widgets;
 
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use std::{path::Path, time::Duration};

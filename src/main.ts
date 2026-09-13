@@ -5,6 +5,12 @@ import "./styles.css";
 type ViewState = "hidden" | "idle" | "compact" | "board";
 type ViewEvent = "globalToggle" | "clickIdleOrb" | "openBoard" | "hide";
 
+type ShellStatus = {
+  hasUnseen: boolean;
+  globalShortcut: string;
+  globalShortcutError: string | null;
+};
+
 type WidgetLayout = {
   id: number;
   sourceKind: string;
@@ -32,6 +38,7 @@ const DEFAULT_WIDGET_WIDTH = 280;
 const DEFAULT_WIDGET_HEIGHT = 180;
 const MIN_WIDGET_WIDTH = 140;
 const MIN_WIDGET_HEIGHT = 96;
+const DEFAULT_GLOBAL_SHORTCUT = "CmdOrCtrl+Shift+Space";
 
 function getAppRoot(): HTMLElement {
   const element = document.querySelector<HTMLElement>("#app");
@@ -43,9 +50,16 @@ function getAppRoot(): HTMLElement {
 
 const root = getAppRoot();
 let currentView: ViewState = "idle";
+let shellStatus: ShellStatus = {
+  hasUnseen: false,
+  globalShortcut: DEFAULT_GLOBAL_SHORTCUT,
+  globalShortcutError: null,
+};
 let boardWidgets: WidgetLayout[] = [];
 let boardLoaded = false;
 let addPoint: Point | null = null;
+let shortcutPopoverOpen = false;
+let shortcutFormError: string | null = null;
 
 function render(): void {
   document.documentElement.dataset.view = currentView;
@@ -71,7 +85,7 @@ function renderIdle(): void {
     <main class="idle-shell">
       <button id="idle-orb" class="idle-orb" type="button" aria-label="Open dopagaki-board">
         <span class="idle-orb__surface" aria-hidden="true"></span>
-        <span class="idle-orb__badge" aria-hidden="true" hidden></span>
+        <span class="idle-orb__badge" aria-hidden="true"${shellStatus.hasUnseen ? "" : " hidden"}></span>
       </button>
     </main>
   `;
@@ -82,11 +96,16 @@ function renderIdle(): void {
 }
 
 function renderCompact(): void {
+  const shortcutWarning = shellStatus.globalShortcutError
+    ? `<button class="shortcut-warning" data-action="shortcut-settings" type="button">Shortcut unavailable</button>`
+    : "";
+
   root.innerHTML = `
     <main class="compact-shell" aria-label="Quick discovery">
       <header class="compact-toolbar">
         <span class="compact-mark" aria-hidden="true"></span>
         <span class="compact-title">dopagaki</span>
+        ${shortcutWarning}
         <button class="icon-button" data-action="board" type="button" aria-label="Open Board">▦</button>
         <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle">×</button>
       </header>
@@ -108,6 +127,13 @@ function renderCompact(): void {
   `;
 
   document.querySelector('[data-action="board"]')?.addEventListener("click", () => {
+    shortcutPopoverOpen = false;
+    void transitionView("openBoard");
+  });
+
+  document.querySelector('[data-action="shortcut-settings"]')?.addEventListener("click", () => {
+    shortcutPopoverOpen = true;
+    shortcutFormError = shellStatus.globalShortcutError;
     void transitionView("openBoard");
   });
 
@@ -128,23 +154,34 @@ function renderCompact(): void {
 function renderBoard(): void {
   const widgetMarkup = boardWidgets.map(renderWidgetMarkup).join("");
   const pickerMarkup = addPoint ? renderAddPickerMarkup(addPoint) : "";
+  const shortcutPopoverMarkup = shortcutPopoverOpen ? renderShortcutPopoverMarkup() : "";
 
   root.innerHTML = `
     <main class="board-shell">
       <header class="board-toolbar">
         <strong>Board</strong>
         <span class="board-toolbar__hint">Click empty space to add · drag to move</span>
+        <button class="icon-button" data-action="shortcut-settings" type="button" aria-label="Global shortcut settings">⌨</button>
         <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle">×</button>
       </header>
       <section class="board-canvas${boardWidgets.length === 0 ? " board-canvas--empty" : ""}" aria-label="Discovery Board">
         ${widgetMarkup}
         ${pickerMarkup}
       </section>
+      ${shortcutPopoverMarkup}
     </main>
   `;
 
   document.querySelector('[data-action="collapse"]')?.addEventListener("click", () => {
+    shortcutPopoverOpen = false;
     void transitionView("globalToggle");
+  });
+
+  document.querySelector('[data-action="shortcut-settings"]')?.addEventListener("click", () => {
+    shortcutPopoverOpen = !shortcutPopoverOpen;
+    shortcutFormError = null;
+    addPoint = null;
+    renderBoard();
   });
 
   const canvas = document.querySelector<HTMLElement>(".board-canvas");
@@ -166,6 +203,7 @@ function renderBoard(): void {
     renderBoard();
   });
 
+  bindShortcutPopover();
   bindWidgetInteractions();
 
   if (!boardLoaded) {
@@ -213,6 +251,57 @@ function renderAddPickerMarkup(point: Point): string {
   `;
 }
 
+function renderShortcutPopoverMarkup(): string {
+  return `
+    <aside class="shortcut-popover" aria-label="Global shortcut settings">
+      <form id="shortcut-form">
+        <label for="shortcut-input">Global shortcut</label>
+        <input id="shortcut-input" type="text" autocomplete="off" spellcheck="false" aria-describedby="shortcut-help shortcut-error">
+        <p id="shortcut-help">Example: CmdOrCtrl+Shift+Space</p>
+        <p id="shortcut-error" class="shortcut-popover__error" hidden></p>
+        <div class="shortcut-popover__actions">
+          <button data-action="cancel-shortcut" type="button">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </aside>
+  `;
+}
+
+function bindShortcutPopover(): void {
+  if (!shortcutPopoverOpen) {
+    return;
+  }
+
+  const input = document.querySelector<HTMLInputElement>("#shortcut-input");
+  const form = document.querySelector<HTMLFormElement>("#shortcut-form");
+  const errorElement = document.querySelector<HTMLElement>("#shortcut-error");
+  if (!input || !form || !errorElement) {
+    return;
+  }
+
+  input.value = shellStatus.globalShortcut;
+  const message = shortcutFormError ?? shellStatus.globalShortcutError;
+  if (message) {
+    errorElement.textContent = message;
+    errorElement.hidden = false;
+  }
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void saveGlobalShortcut(input.value);
+  });
+
+  document.querySelector('[data-action="cancel-shortcut"]')?.addEventListener("click", () => {
+    shortcutPopoverOpen = false;
+    shortcutFormError = null;
+    renderBoard();
+  });
+
+  input.focus();
+  input.select();
+}
+
 function handleBoardPointerDown(event: PointerEvent): void {
   const canvas = event.currentTarget as HTMLElement;
   if (event.target !== canvas) {
@@ -223,6 +312,8 @@ function handleBoardPointerDown(event: PointerEvent): void {
   const x = clamp(event.clientX - rect.left, 0, Math.max(0, rect.width - DEFAULT_WIDGET_WIDTH));
   const y = clamp(event.clientY - rect.top, 0, Math.max(0, rect.height - DEFAULT_WIDGET_HEIGHT));
   addPoint = { x: Math.round(x), y: Math.round(y) };
+  shortcutPopoverOpen = false;
+  shortcutFormError = null;
   renderBoard();
 }
 
@@ -397,6 +488,20 @@ async function removeBoardWidget(id: number): Promise<void> {
   }
 }
 
+async function saveGlobalShortcut(shortcut: string): Promise<void> {
+  try {
+    shellStatus = await invoke<ShellStatus>("set_global_shortcut", { shortcut });
+    shortcutFormError = null;
+    shortcutPopoverOpen = false;
+    render();
+  } catch (error) {
+    shortcutFormError = getErrorMessage(error);
+    if (currentView === "board") {
+      renderBoard();
+    }
+  }
+}
+
 async function transitionView(event: ViewEvent): Promise<void> {
   try {
     currentView = await invoke<ViewState>("transition_view", { event });
@@ -421,13 +526,34 @@ async function boot(): Promise<void> {
     render();
   });
 
+  await listen<ShellStatus>("shell-status-changed", (event) => {
+    shellStatus = event.payload;
+    render();
+  });
+
   try {
     currentView = await invoke<ViewState>("get_view_state");
   } catch (error) {
     console.error("failed to read initial view state", error);
   }
 
+  try {
+    shellStatus = await invoke<ShellStatus>("get_shell_status");
+  } catch (error) {
+    console.error("failed to read shell status", error);
+  }
+
   render();
+}
+
+function getErrorMessage(error: unknown): string {
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

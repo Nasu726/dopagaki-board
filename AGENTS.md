@@ -7,6 +7,7 @@ These rules exist so long-running AI-assisted development preserves the product'
 Before substantial work, read:
 
 - `README.md`
+- `docs/HANDOFF.md`
 - `docs/PRODUCT_SPEC.md`
 - `docs/UX_AND_DESIGN.md`
 - `docs/ARCHITECTURE.md`
@@ -14,7 +15,7 @@ Before substantial work, read:
 - `docs/ROADMAP.md`
 - `docs/DECISIONS.md`
 
-GitHub Issue #1 is the frozen initial project-memory checkpoint.
+GitHub Issue #1 is the frozen initial project-memory checkpoint. `docs/HANDOFF.md` is the live restart point.
 
 ## Product invariants
 
@@ -77,10 +78,14 @@ Do not turn Compact or Board into a generic card dashboard with permanent header
 
 Source-specific minimal rendering is intentional. Do not add metadata simply because it is available.
 
-## Decision hygiene
+## Decision and handoff hygiene
 
 If implementation forces a product/architecture decision that is currently open, update `docs/DECISIONS.md` in the same change.
 
 If a confirmed decision must change, record what changed and why.
 
-Do not rely on temporary chat context for decisions that future work must know.
+If work creates reusable debugging knowledge, a non-obvious implementation constraint, a CI incident, or a new exact restart point, update `docs/HANDOFF.md` in the same feature batch.
+
+Task-specific status belongs in the relevant Issue/PR. Measured performance results belong in `docs/PERF_BASELINE.md`.
+
+Do not rely on temporary chat context for decisions or knowledge that future work must know. Meta issue #13 tracks this repository-memory discipline.

@@ -1,6 +1,6 @@
 # Roadmap
 
-Current checkpoint (2026-09-14): the runnable shell, state loop, free-form Board, cache/scheduler, first real arXiv adapter, and first simplification pass are implemented. Issue #35 adds editable widget source configuration and is the final planned MVP feature slice before a first-complete usability checkpoint. A reproducible desktop performance procedure exists, but the actual numeric Idle CPU/RSS baseline is still pending and must not be reconstructed from CI or estimates.
+Current checkpoint (2026-09-14): **functional MVP first-complete checkpoint reached.** The runnable shell, state loop, free-form Board, cache/scheduler, first real arXiv adapter, first simplification pass, and editable arXiv query/result-count UI are implemented on `main`. The next product checkpoint is real desktop validation and measurement, not automatic feature expansion. A reproducible performance procedure exists, but the actual numeric Idle CPU/RSS baseline is still pending and must not be reconstructed from CI or estimates.
 
 ## Phase 0 — durable specification
 
@@ -67,7 +67,7 @@ Primary issue #5 is complete.
 Suggested order:
 
 1. [x] arXiv — async Atom metadata adapter, source-specific 24 h automatic-refresh floor, serialized request gate.
-   - [ ] Editable query/result-count UI (#35; in progress).
+   - [x] Editable query/result-count UI (#35 / PR #40).
 2. [ ] YouTube — groups/subscribed channels, thumbnails, recommendation heuristic, quota awareness.
 3. [ ] Wikipedia/Wikimedia — daily featured/on-this-day/random discovery.
 4. [ ] NHK.

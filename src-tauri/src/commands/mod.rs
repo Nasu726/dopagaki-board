@@ -1,9 +1,4 @@
-mod cache_refresh;
-
-pub(crate) use cache_refresh::{
-    get_refresh_settings, list_cached_items, list_cached_items_for_source, mark_cached_items_seen,
-    set_auto_refresh_interval,
-};
+pub(crate) mod cache_refresh;
 
 use crate::{
     app::{self, AppState, ShellStatus, ViewEvent, ViewState, GLOBAL_SHORTCUT_SETTING_KEY},
@@ -279,7 +274,7 @@ fn persist_shortcut(state: &AppState, shortcut: &str) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn publish_shell_status(app: &AppHandle, status: &ShellStatus) {
+pub(crate) fn publish_shell_status(app: &AppHandle, status: &ShellStatus) {
     if let Err(error) = app.emit(SHELL_STATUS_CHANGED_EVENT, status.clone()) {
         eprintln!("failed to emit shell status: {error}");
     }

@@ -272,7 +272,10 @@ mod tests {
         assert_eq!(items[0].id, "2401.00001");
         assert_eq!(items[0].external_url, "https://arxiv.org/abs/2401.00001");
         assert_eq!(items[0].title.as_deref(), Some("A Paper With Spacing"));
-        assert_eq!(items[0].author.as_deref(), Some("Alice Example, Bob Example"));
+        assert_eq!(
+            items[0].author.as_deref(),
+            Some("Alice Example, Bob Example")
+        );
         assert!(items[0].payload_json.contains("cs.AI"));
     }
 

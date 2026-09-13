@@ -1,4 +1,7 @@
-use crate::{app::AppState, db};
+use crate::{
+    app::{AppState, ViewEvent, ViewState},
+    db,
+};
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
@@ -34,4 +37,27 @@ pub(crate) fn bootstrap_probe(state: State<'_, AppState>) -> Result<BootstrapPro
         app_name: "dopagaki-board",
         stored_value,
     })
+}
+
+#[tauri::command]
+pub(crate) fn get_view_state(state: State<'_, AppState>) -> Result<ViewState, String> {
+    state
+        .view
+        .lock()
+        .map(|view| *view)
+        .map_err(|_| "view state lock was poisoned".to_owned())
+}
+
+#[tauri::command]
+pub(crate) fn transition_view(
+    event: ViewEvent,
+    state: State<'_, AppState>,
+) -> Result<ViewState, String> {
+    let mut view = state
+        .view
+        .lock()
+        .map_err(|_| "view state lock was poisoned".to_owned())?;
+
+    *view = view.transition(event);
+    Ok(*view)
 }

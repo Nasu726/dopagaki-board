@@ -13,13 +13,13 @@
     "windows": [
       {
         "label": "main",
-        "title": "dopagaki-board · bootstrap",
-        "width": 560,
-        "height": 360,
-        "minWidth": 360,
-        "minHeight": 220,
-        "resizable": true,
-        "decorations": true
+        "title": "dopagaki-board",
+        "width": 64,
+        "height": 64,
+        "minWidth": 40,
+        "minHeight": 40,
+        "resizable": false,
+        "decorations": false
       }
     ],
     "security": {

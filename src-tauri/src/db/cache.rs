@@ -19,6 +19,21 @@ pub(crate) struct CachedItem {
     pub(crate) is_unseen: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CacheWriteItem {
+    pub(crate) id: String,
+    pub(crate) source_kind: String,
+    pub(crate) source_config_json: String,
+    pub(crate) external_url: String,
+    pub(crate) title: Option<String>,
+    pub(crate) image_url: Option<String>,
+    pub(crate) author: Option<String>,
+    pub(crate) published_at: Option<i64>,
+    pub(crate) fetched_at: i64,
+    pub(crate) score: f64,
+    pub(crate) payload_json: String,
+}
+
 pub(crate) fn seed_demo_items(connection: &Connection, now: i64) -> Result<()> {
     let items = [
         (
@@ -73,6 +88,31 @@ pub(crate) fn seed_demo_items(connection: &Connection, now: i64) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub(crate) fn upsert_items(connection: &Connection, items: &[CacheWriteItem]) -> Result<usize> {
+    let mut changed = 0;
+    let mut statement = connection.prepare(
+        "INSERT INTO feed_items (\n           id, source_kind, source_config_json, external_url, title, image_url, author,\n           published_at, fetched_at, score, is_unseen, payload_json\n         ) VALUES (\n           ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,\n           CASE WHEN EXISTS(\n             SELECT 1 FROM feed_items WHERE id = ?1 AND is_unseen = 0\n           ) THEN 0 ELSE 1 END,\n           ?11\n         )\n         ON CONFLICT(source_kind, source_config_json, id) DO UPDATE SET\n           external_url = excluded.external_url,\n           title = excluded.title,\n           image_url = excluded.image_url,\n           author = excluded.author,\n           published_at = excluded.published_at,\n           fetched_at = excluded.fetched_at,\n           score = excluded.score,\n           payload_json = excluded.payload_json",
+    )?;
+
+    for item in items {
+        changed += statement.execute(params![
+            item.id,
+            item.source_kind,
+            item.source_config_json,
+            item.external_url,
+            item.title,
+            item.image_url,
+            item.author,
+            item.published_at,
+            item.fetched_at,
+            item.score,
+            item.payload_json,
+        ])?;
+    }
+
+    Ok(changed)
 }
 
 pub(crate) fn list_top(connection: &Connection, limit: usize) -> Result<Vec<CachedItem>> {
@@ -149,6 +189,22 @@ mod tests {
         connection
     }
 
+    fn write_item(config: &str, title: &str, fetched_at: i64) -> CacheWriteItem {
+        CacheWriteItem {
+            id: "2401.00001".to_owned(),
+            source_kind: "arxiv".to_owned(),
+            source_config_json: config.to_owned(),
+            external_url: "https://arxiv.org/abs/2401.00001".to_owned(),
+            title: Some(title.to_owned()),
+            image_url: None,
+            author: Some("A. Author".to_owned()),
+            published_at: None,
+            fetched_at,
+            score: 10.0,
+            payload_json: "{}".to_owned(),
+        }
+    }
+
     #[test]
     fn demo_cache_is_immediately_readable_without_network() {
         let connection = database();
@@ -217,5 +273,42 @@ mod tests {
         let items = list_top(&connection, 100).expect("cache should read");
         assert_eq!(items.len(), 6);
         assert!(items.iter().all(|item| item.fetched_at == 100));
+    }
+
+    #[test]
+    fn refreshing_existing_item_preserves_seen_state() {
+        let connection = database();
+        let item = write_item("{}", "First title", 10);
+        upsert_items(&connection, &[item.clone()]).expect("first write should succeed");
+        mark_seen(&connection, &[item.id.clone()]).expect("seen state should update");
+
+        let mut refreshed = item;
+        refreshed.title = Some("Updated title".to_owned());
+        refreshed.fetched_at = 20;
+        upsert_items(&connection, &[refreshed]).expect("refresh write should succeed");
+
+        let items = list_for_source(&connection, "arxiv", "{}", 3).expect("cache should read");
+        assert_eq!(items[0].title.as_deref(), Some("Updated title"));
+        assert!(!items[0].is_unseen);
+    }
+
+    #[test]
+    fn new_duplicate_source_row_inherits_global_seen_state() {
+        let connection = database();
+        let first = write_item("{\"query\":\"cat:cs.AI\"}", "AI copy", 10);
+        upsert_items(&connection, &[first]).expect("first write should succeed");
+        mark_seen(&connection, &["2401.00001".to_owned()]).expect("seen state should update");
+
+        let second = write_item("{\"query\":\"cat:cs.LG\"}", "ML copy", 20);
+        upsert_items(&connection, &[second]).expect("second write should succeed");
+
+        let unseen: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM feed_items WHERE id = '2401.00001' AND is_unseen = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("seen rows should count");
+        assert_eq!(unseen, 0);
     }
 }

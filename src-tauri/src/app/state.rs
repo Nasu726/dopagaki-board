@@ -2,7 +2,8 @@ use super::ViewState;
 use crate::scheduler::{Scheduler, MAX_BACKGROUND_REFRESHES};
 use rusqlite::Connection;
 use serde::Serialize;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "CmdOrCtrl+Shift+Space";
 pub(crate) const GLOBAL_SHORTCUT_SETTING_KEY: &str = "shell.global_shortcut";
@@ -31,6 +32,7 @@ pub(crate) struct AppState {
     pub(crate) shell: Mutex<ShellStatus>,
     pub(crate) scheduler: Mutex<Scheduler>,
     pub(crate) shortcut_change: Mutex<()>,
+    pub(crate) coordinator_wakeup: Arc<Notify>,
 }
 
 impl AppState {
@@ -41,6 +43,7 @@ impl AppState {
             shell: Mutex::new(shell),
             scheduler: Mutex::new(Scheduler::new(MAX_BACKGROUND_REFRESHES)),
             shortcut_change: Mutex::new(()),
+            coordinator_wakeup: Arc::new(Notify::new()),
         }
     }
 }

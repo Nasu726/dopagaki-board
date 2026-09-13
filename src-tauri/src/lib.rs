@@ -6,8 +6,6 @@ use std::fs;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-const DEFAULT_GLOBAL_SHORTCUT: &str = "CmdOrCtrl+Shift+Space";
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -30,11 +28,18 @@ pub fn run() {
 
             let db_path = app_data_dir.join("dopagaki-board.sqlite3");
             let connection = db::open(&db_path)?;
-            app.manage(app::AppState::new(connection));
+            let global_shortcut = db::get_setting(&connection, app::GLOBAL_SHORTCUT_SETTING_KEY)?
+                .unwrap_or_else(|| app::DEFAULT_GLOBAL_SHORTCUT.to_owned());
+            let global_shortcut_error = app
+                .global_shortcut()
+                .register(global_shortcut.as_str())
+                .err()
+                .map(|error| format!("could not register {global_shortcut}: {error}"));
 
-            if let Err(error) = app.global_shortcut().register(DEFAULT_GLOBAL_SHORTCUT) {
-                eprintln!("could not register global shortcut {DEFAULT_GLOBAL_SHORTCUT}: {error}");
-            }
+            app.manage(app::AppState::new(
+                connection,
+                app::ShellStatus::new(global_shortcut, global_shortcut_error),
+            ));
 
             if let Err(error) = app::apply_current_view(app.handle()) {
                 eprintln!("failed to apply initial view state: {error}");
@@ -47,6 +52,9 @@ pub fn run() {
             commands::get_view_state,
             commands::transition_view,
             commands::open_content,
+            commands::get_shell_status,
+            commands::set_global_shortcut,
+            commands::set_unseen,
             commands::list_widgets,
             commands::add_widget,
             commands::update_widget_geometry,

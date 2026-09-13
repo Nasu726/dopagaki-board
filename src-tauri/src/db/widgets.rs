@@ -96,15 +96,10 @@ mod tests {
             .expect("widget should be created");
         assert_eq!(widget.source_config_json, "{}");
         assert_eq!(widget.refresh_config_json, "{}");
-        assert!(update_geometry(
-            &connection,
-            widget.id,
-            40.0,
-            50.0,
-            320.0,
-            210.0,
-        )
-        .expect("geometry should update"));
+        assert!(
+            update_geometry(&connection, widget.id, 40.0, 50.0, 320.0, 210.0,)
+                .expect("geometry should update")
+        );
 
         let widgets = list(&connection).expect("widgets should list");
         assert_eq!(widgets.len(), 1);

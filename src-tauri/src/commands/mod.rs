@@ -11,14 +11,7 @@ const MIN_WIDGET_WIDTH: f64 = 140.0;
 const MIN_WIDGET_HEIGHT: f64 = 96.0;
 const MAX_WIDGET_SIZE: f64 = 4096.0;
 const MAX_WIDGET_POSITION: f64 = 65_536.0;
-const SOURCE_KINDS: &[&str] = &[
-    "youtube",
-    "arxiv",
-    "wikipedia",
-    "nhk",
-    "qiita",
-    "zenn",
-];
+const SOURCE_KINDS: &[&str] = &["youtube", "arxiv", "wikipedia", "nhk", "qiita", "zenn"];
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

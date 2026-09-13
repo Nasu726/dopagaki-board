@@ -59,7 +59,11 @@ mod tests {
         run(&connection).expect("upgrade should succeed");
 
         let value: String = connection
-            .query_row("SELECT value FROM settings WHERE key = 'keep.me'", [], |row| row.get(0))
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'keep.me'",
+                [],
+                |row| row.get(0),
+            )
             .expect("existing setting should survive");
         assert_eq!(value, "yes");
     }

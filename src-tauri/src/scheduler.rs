@@ -83,6 +83,17 @@ impl Scheduler {
         now: i64,
         auto_interval_seconds: Option<u64>,
     ) {
+        let interval_changed = self
+            .sources
+            .get(&key)
+            .is_some_and(|state| state.auto_interval_seconds != auto_interval_seconds);
+
+        if interval_changed {
+            self.pending.retain(|request| {
+                request.key != key || request.priority == RefreshPriority::Manual
+            });
+        }
+
         match self.sources.get_mut(&key) {
             Some(state) if state.auto_interval_seconds != auto_interval_seconds => {
                 state.auto_interval_seconds = auto_interval_seconds;
@@ -267,6 +278,24 @@ mod tests {
 
         scheduler.request_manual(source.clone(), 1_000_000);
         assert_eq!(scheduler.pop_ready(1_000_000), Some(source));
+    }
+
+    #[test]
+    fn turning_auto_off_cancels_queued_auto_but_preserves_manual() {
+        let mut scheduler = Scheduler::new(1);
+        let source = key("youtube");
+        scheduler.sync_source(source.clone(), 0, Some(10));
+        scheduler.mark_due(10);
+        assert_eq!(scheduler.queued_count(), 1);
+
+        scheduler.sync_source(source.clone(), 10, None);
+        assert_eq!(scheduler.queued_count(), 0);
+        assert_eq!(scheduler.pop_ready(10), None);
+
+        scheduler.request_manual(source.clone(), 11);
+        scheduler.sync_source(source.clone(), 11, Some(60));
+        assert_eq!(scheduler.queued_count(), 1);
+        assert_eq!(scheduler.pop_ready(11), Some(source));
     }
 
     #[test]

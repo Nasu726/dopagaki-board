@@ -18,6 +18,10 @@ jobs:
         with:
           node-version: 22
 
+      - name: Materialize Windows icon
+        shell: pwsh
+        run: ./scripts/decode_windows_icon.ps1
+
       - name: Install frontend dependencies
         run: npm install
 

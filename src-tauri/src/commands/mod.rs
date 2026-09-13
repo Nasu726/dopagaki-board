@@ -1,10 +1,11 @@
 use crate::{
-    app::{AppState, ViewEvent, ViewState},
+    app::{self, AppState, ViewEvent, ViewState},
     db,
 };
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,24 +41,27 @@ pub(crate) fn bootstrap_probe(state: State<'_, AppState>) -> Result<BootstrapPro
 }
 
 #[tauri::command]
-pub(crate) fn get_view_state(state: State<'_, AppState>) -> Result<ViewState, String> {
-    state
-        .view
-        .lock()
-        .map(|view| *view)
-        .map_err(|_| "view state lock was poisoned".to_owned())
+pub(crate) fn get_view_state(app: AppHandle) -> Result<ViewState, String> {
+    app::current_view(&app)
 }
 
 #[tauri::command]
 pub(crate) fn transition_view(
     event: ViewEvent,
-    state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<ViewState, String> {
-    let mut view = state
-        .view
-        .lock()
-        .map_err(|_| "view state lock was poisoned".to_owned())?;
+    app::transition_view(&app, event)
+}
 
-    *view = view.transition(event);
-    Ok(*view)
+#[tauri::command]
+pub(crate) fn open_content(url: String, app: AppHandle) -> Result<ViewState, String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("only http(s) content URLs are supported".to_owned());
+    }
+
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| format!("failed to open content URL: {error}"))?;
+
+    app::transition_view(&app, ViewEvent::ExternalLaunch)
 }

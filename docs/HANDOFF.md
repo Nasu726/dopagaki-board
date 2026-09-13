@@ -219,6 +219,15 @@ The frontend remains Vanilla TypeScript. Do not add React/Vue/Svelte, a grid eng
 
 Cache hydration must not replace widget containers or reset pointer gestures; update only each widget's content node. The manual-refresh button is excluded from the drag-handle pointer path.
 
+## Rust temporary-lifetime pitfall
+
+Two prior `E0597` incidents came from tail expressions retaining a temporary longer than expected:
+
+- PR #12: `query_map(...).collect()` relative to a prepared statement
+- PR #16: tail `match state.shell.lock()` relative to Tauri `State`
+
+For this family of error, first make destruction order explicit with a local binding or terminating semicolon before redesigning ownership.
+
 ## Performance baseline status
 
 `docs/PERF_BASELINE.md` contains the canonical procedure. The release-build/process-tree tooling landed before the arXiv adapter, but the actual numeric pre-adapter baseline was not captured. Do not fabricate it retroactively.

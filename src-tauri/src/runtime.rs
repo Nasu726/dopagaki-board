@@ -2,7 +2,8 @@ use crate::{
     app::AppState,
     commands::publish_shell_status,
     db::{self, refresh_state::SourceRefreshState},
-    scheduler::{SourceKey, AUTO_REFRESH_SETTING_KEY, DEFAULT_AUTO_REFRESH_SECONDS},
+    refresh_settings,
+    scheduler::SourceKey,
     sources::{self, arxiv::ArxivClient},
 };
 use serde::Serialize;
@@ -14,8 +15,6 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 
 const CACHE_CHANGED_EVENT: &str = "cache-changed";
-const MIN_AUTO_REFRESH_SECONDS: u64 = 5 * 60;
-const MAX_AUTO_REFRESH_SECONDS: u64 = 24 * 60 * 60;
 const COORDINATOR_ERROR_RETRY_SECONDS: i64 = 60;
 
 #[derive(Debug, Clone, Serialize)]
@@ -64,7 +63,7 @@ pub(crate) fn request_manual_for_widget(id: i64, state: &AppState) -> Result<(),
         let persisted =
             db::refresh_state::get(&connection, &key.source_kind, &key.source_config_json)
                 .map_err(|error| format!("failed to read source refresh state: {error}"))?;
-        let global_interval = read_global_auto_interval(&connection)?;
+        let global_interval = refresh_settings::read(&connection)?;
         let auto_interval = sources::effective_auto_interval(&key.source_kind, global_interval);
         (key, persisted, auto_interval)
     };
@@ -144,7 +143,7 @@ fn sync_scheduler_sources(app: &AppHandle, now: i64) -> Result<(), String> {
             .db
             .lock()
             .map_err(|_| "database lock was poisoned".to_owned())?;
-        let global_interval = read_global_auto_interval(&connection)?;
+        let global_interval = refresh_settings::read(&connection)?;
         let widgets = db::widgets::list(&connection)
             .map_err(|error| format!("failed to list widget sources: {error}"))?;
 
@@ -388,25 +387,6 @@ fn matching_widget_ids(widgets: &[db::widgets::WidgetLayout], key: &SourceKey) -
         .collect()
 }
 
-fn read_global_auto_interval(connection: &rusqlite::Connection) -> Result<Option<u64>, String> {
-    match db::get_setting(connection, AUTO_REFRESH_SETTING_KEY)
-        .map_err(|error| format!("failed to read refresh interval: {error}"))?
-    {
-        None => Ok(Some(DEFAULT_AUTO_REFRESH_SECONDS)),
-        Some(value) if value == "off" => Ok(None),
-        Some(value) => {
-            let seconds = value
-                .parse::<u64>()
-                .map_err(|_| "stored refresh interval is invalid".to_owned())?;
-            if (MIN_AUTO_REFRESH_SECONDS..=MAX_AUTO_REFRESH_SECONDS).contains(&seconds) {
-                Ok(Some(seconds))
-            } else {
-                Err("stored refresh interval is outside the supported range".to_owned())
-            }
-        }
-    }
-}
-
 async fn wait_for_wakeup(app: &AppHandle, deadline: Option<i64>, now: i64) {
     let wakeup = app.state::<AppState>().coordinator_wakeup.clone();
     match deadline {
@@ -426,27 +406,4 @@ fn unix_seconds() -> Result<i64, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("system clock error: {error}"))
         .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db::migrations;
-
-    #[test]
-    fn refresh_setting_defaults_and_off_are_read_without_runtime_state() {
-        let connection = rusqlite::Connection::open_in_memory().expect("SQLite should open");
-        migrations::run(&connection).expect("migration should succeed");
-        assert_eq!(
-            read_global_auto_interval(&connection).expect("default should read"),
-            Some(DEFAULT_AUTO_REFRESH_SECONDS)
-        );
-
-        db::set_setting(&connection, AUTO_REFRESH_SETTING_KEY, "off")
-            .expect("setting should write");
-        assert_eq!(
-            read_global_auto_interval(&connection).expect("off should read"),
-            None
-        );
-    }
 }

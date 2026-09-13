@@ -2,15 +2,11 @@ use super::publish_shell_status;
 use crate::{
     app::{AppState, ShellStatus},
     db::{self, cache::CachedItem},
-    runtime,
-    scheduler::{AUTO_REFRESH_SETTING_KEY, DEFAULT_AUTO_REFRESH_SECONDS},
-    source_config,
+    refresh_settings, runtime, source_config,
 };
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-const MIN_AUTO_REFRESH_SECONDS: u64 = 5 * 60;
-const MAX_AUTO_REFRESH_SECONDS: u64 = 24 * 60 * 60;
 const DEFAULT_CACHE_LIMIT: usize = 3;
 const MAX_CACHE_LIMIT: usize = 100;
 
@@ -26,9 +22,8 @@ pub(crate) fn get_refresh_settings(state: State<'_, AppState>) -> Result<Refresh
         .db
         .lock()
         .map_err(|_| "database lock was poisoned".to_owned())?;
-    let auto_interval_seconds = read_auto_interval(&connection)?;
     Ok(RefreshSettings {
-        auto_interval_seconds,
+        auto_interval_seconds: refresh_settings::read(&connection)?,
     })
 }
 
@@ -37,18 +32,12 @@ pub(crate) fn set_auto_refresh_interval(
     auto_interval_seconds: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<RefreshSettings, String> {
-    validate_auto_interval(auto_interval_seconds)?;
-
     {
         let connection = state
             .db
             .lock()
             .map_err(|_| "database lock was poisoned".to_owned())?;
-        let value = auto_interval_seconds
-            .map(|seconds| seconds.to_string())
-            .unwrap_or_else(|| "off".to_owned());
-        db::set_setting(&connection, AUTO_REFRESH_SETTING_KEY, &value)
-            .map_err(|error| format!("failed to persist refresh interval: {error}"))?;
+        refresh_settings::write(&connection, auto_interval_seconds)?;
     }
 
     runtime::wake(&state);
@@ -125,36 +114,6 @@ pub(crate) fn mark_cached_items_seen(
     Ok(next)
 }
 
-fn read_auto_interval(connection: &rusqlite::Connection) -> Result<Option<u64>, String> {
-    match db::get_setting(connection, AUTO_REFRESH_SETTING_KEY)
-        .map_err(|error| format!("failed to read refresh interval: {error}"))?
-    {
-        None => Ok(Some(DEFAULT_AUTO_REFRESH_SECONDS)),
-        Some(value) if value == "off" => Ok(None),
-        Some(value) => {
-            let seconds = value
-                .parse::<u64>()
-                .map_err(|_| "stored refresh interval is invalid".to_owned())?;
-            validate_auto_interval(Some(seconds))?;
-            Ok(Some(seconds))
-        }
-    }
-}
-
-fn validate_auto_interval(value: Option<u64>) -> Result<(), String> {
-    match value {
-        None => Ok(()),
-        Some(seconds)
-            if (MIN_AUTO_REFRESH_SECONDS..=MAX_AUTO_REFRESH_SECONDS).contains(&seconds) =>
-        {
-            Ok(())
-        }
-        Some(_) => {
-            Err("automatic refresh must be OFF or between 5 minutes and 24 hours".to_owned())
-        }
-    }
-}
-
 fn validate_cache_limit(limit: usize) -> Result<usize, String> {
     if (1..=MAX_CACHE_LIMIT).contains(&limit) {
         Ok(limit)
@@ -166,37 +125,12 @@ fn validate_cache_limit(limit: usize) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::migrations;
 
     #[test]
-    fn refresh_interval_accepts_off_and_supported_range() {
-        assert!(validate_auto_interval(None).is_ok());
-        assert!(validate_auto_interval(Some(5 * 60)).is_ok());
-        assert!(validate_auto_interval(Some(60 * 60)).is_ok());
-        assert!(validate_auto_interval(Some(24 * 60 * 60)).is_ok());
-        assert!(validate_auto_interval(Some(60)).is_err());
-        assert!(validate_auto_interval(Some(24 * 60 * 60 + 1)).is_err());
-    }
-
-    #[test]
-    fn absent_refresh_setting_defaults_to_one_hour() {
-        let connection = rusqlite::Connection::open_in_memory().expect("SQLite should open");
-        migrations::run(&connection).expect("migration should succeed");
-        assert_eq!(
-            read_auto_interval(&connection).expect("setting should read"),
-            Some(DEFAULT_AUTO_REFRESH_SECONDS)
-        );
-    }
-
-    #[test]
-    fn off_refresh_setting_roundtrips() {
-        let connection = rusqlite::Connection::open_in_memory().expect("SQLite should open");
-        migrations::run(&connection).expect("migration should succeed");
-        db::set_setting(&connection, AUTO_REFRESH_SETTING_KEY, "off")
-            .expect("setting should write");
-        assert_eq!(
-            read_auto_interval(&connection).expect("setting should read"),
-            None
-        );
+    fn cache_limit_is_bounded() {
+        assert_eq!(validate_cache_limit(1).unwrap(), 1);
+        assert_eq!(validate_cache_limit(MAX_CACHE_LIMIT).unwrap(), MAX_CACHE_LIMIT);
+        assert!(validate_cache_limit(0).is_err());
+        assert!(validate_cache_limit(MAX_CACHE_LIMIT + 1).is_err());
     }
 }

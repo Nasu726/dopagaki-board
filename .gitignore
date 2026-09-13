@@ -2,6 +2,7 @@ node_modules/
 dist/
 .vite/
 src-tauri/target/
+src-tauri/icons/icon.ico
 __pycache__/
 *.py[cod]
 *.sqlite

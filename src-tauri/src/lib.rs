@@ -78,6 +78,11 @@ pub fn run() {
             commands::add_widget,
             commands::update_widget_geometry,
             commands::delete_widget,
+            commands::get_refresh_settings,
+            commands::set_auto_refresh_interval,
+            commands::list_cached_items,
+            commands::list_cached_items_for_source,
+            commands::mark_cached_items_seen,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run dopagaki-board");

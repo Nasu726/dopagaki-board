@@ -5,11 +5,15 @@ import "./styles.css";
 type ViewState = "hidden" | "idle" | "compact" | "board";
 type ViewEvent = "globalToggle" | "clickIdleOrb" | "openBoard" | "hide";
 
-const root = document.querySelector<HTMLElement>("#app");
-if (!root) {
-  throw new Error("#app root was not found");
+function getAppRoot(): HTMLElement {
+  const element = document.querySelector<HTMLElement>("#app");
+  if (!element) {
+    throw new Error("#app root was not found");
+  }
+  return element;
 }
 
+const root = getAppRoot();
 let currentView: ViewState = "idle";
 
 function render(): void {

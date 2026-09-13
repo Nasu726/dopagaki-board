@@ -5,8 +5,6 @@ use crate::{
     db::{self, widgets::WidgetLayout},
     runtime,
 };
-use serde::Serialize;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
@@ -18,39 +16,6 @@ const MAX_WIDGET_POSITION: f64 = 65_536.0;
 const MAX_SHORTCUT_LENGTH: usize = 128;
 const SHELL_STATUS_CHANGED_EVENT: &str = "shell-status-changed";
 const SOURCE_KINDS: &[&str] = &["youtube", "arxiv", "wikipedia", "nhk", "qiita", "zenn"];
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct BootstrapProbe {
-    app_name: &'static str,
-    stored_value: String,
-}
-
-#[tauri::command]
-pub(crate) fn bootstrap_probe(state: State<'_, AppState>) -> Result<BootstrapProbe, String> {
-    let probe_value = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| format!("system clock error: {error}"))?
-        .as_millis()
-        .to_string();
-
-    let connection = state
-        .db
-        .lock()
-        .map_err(|_| "database lock was poisoned".to_owned())?;
-
-    db::set_setting(&connection, "bootstrap.probe", &probe_value)
-        .map_err(|error| format!("SQLite write failed: {error}"))?;
-
-    let stored_value = db::get_setting(&connection, "bootstrap.probe")
-        .map_err(|error| format!("SQLite read failed: {error}"))?
-        .ok_or_else(|| "SQLite probe value disappeared after write".to_owned())?;
-
-    Ok(BootstrapProbe {
-        app_name: "dopagaki-board",
-        stored_value,
-    })
-}
 
 #[tauri::command]
 pub(crate) fn get_view_state(app: AppHandle) -> Result<ViewState, String> {
@@ -78,24 +43,6 @@ pub(crate) fn open_content(url: String, app: AppHandle) -> Result<ViewState, Str
 #[tauri::command]
 pub(crate) fn get_shell_status(state: State<'_, AppState>) -> Result<ShellStatus, String> {
     read_shell_status(&state)
-}
-
-#[tauri::command]
-pub(crate) fn set_unseen(
-    has_unseen: bool,
-    state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<ShellStatus, String> {
-    let next = {
-        let mut shell = state
-            .shell
-            .lock()
-            .map_err(|_| "shell status lock was poisoned".to_owned())?;
-        shell.has_unseen = has_unseen;
-        shell.clone()
-    };
-    publish_shell_status(&app, &next);
-    Ok(next)
 }
 
 #[tauri::command]

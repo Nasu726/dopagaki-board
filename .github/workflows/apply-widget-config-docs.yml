@@ -1,0 +1,33 @@
+name: Apply widget config docs
+
+on:
+  push:
+    branches: [feat-widget-source-config]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat-widget-source-config
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply docs patch
+        run: python scripts/update_widget_config_docs.py
+
+      - name: Commit docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/HANDOFF.md docs/ROADMAP.md
+          git commit -m "Advance handoff to widget source configuration"
+          git push origin HEAD:feat-widget-source-config

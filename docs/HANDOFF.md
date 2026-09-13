@@ -13,37 +13,54 @@ Merged to `main`:
 - PR #17: Linux Idle performance baseline tooling
 - PR #18: independent Linux / Windows / macOS CI, each reaching a Tauri release build
 - PR #19: cache-first SQLite data layer + deterministic scheduler core
+- PR #22: cache-driven Compact/Board presentation + automatic-refresh slider
 
-Issue #3 is intentionally still open. Its code-side acceptance criteria are complete; the remaining item is a **real desktop Idle CPU/RSS baseline** recorded in `docs/PERF_BASELINE.md`.
+Issue #20 is complete. PR #23 was a duplicate frontend implementation and was closed after #22 merged.
 
-Active branch: `feat/cache-ui`.
-Active PR: #22.
-Current work: frontend/UI slice of Issue #20.
+Current product-correctness branch: `fix-cache-identity`.
+Current product-correctness PR: #24.
 
-PR #22 is intentionally limited to cache-driven presentation and refresh settings:
+PR #24 is the prerequisite for Issue #21 before real arXiv writes. It now establishes both cache identity and canonical source keys:
 
-1. Compact reads the top 1–3 persisted cache items instead of hard-coded prototype cards.
-2. Items presented in Compact are marked seen through `mark_cached_items_seen`, preserving Rust-owned `ShellStatus.has_unseen` as the source of truth.
-3. Board widgets hydrate from `list_cached_items_for_source(source_kind, source_config_json)` without rebuilding the whole Board when async cache reads finish.
-4. Identical Board source/config pairs share one cache read per hydration pass.
-5. External titles/authors/image URLs are assigned through DOM properties / `textContent`; they are not interpolated into `innerHTML`.
-6. Board gets an automatic-refresh popover backed by the existing settings commands. Position 0 is OFF; positions 1..100 map logarithmically from 5 minutes to 24 hours so short intervals get more slider space.
-7. No manual refresh button, HTTP adapter, runtime coordinator, or new frontend framework belongs in this PR.
+1. schema v4 makes `feed_items` primary key `(source_kind, source_config_json, id)` rather than globally unique `id`
+2. v3 cache rows migrate without loss
+3. the same external item may belong to several source/query configurations safely
+4. `mark_seen` remains intentionally global by external item id
+5. the top/global cache query deduplicates identical item ids so overlapping queries do not repeat the same paper in Compact
+6. source config JSON is parsed as a bounded JSON object, recursively key-sorted, and serialized compactly
+7. scheduler keys and source-specific cache reads use the canonical config, so whitespace/key-order differences do not create duplicate source instances
+8. tests cover migration, duplicate source-scoped rows, global seen propagation, top-cache deduplication, and equivalent JSON source keys
 
-After #22 is green and merged, continue with Issue #21: event/deadline-driven runtime coordination plus the first real arXiv adapter. Do not expand the pure scheduler spec instead of executing real background work.
+After #24 is green and merged, Issue #21 can proceed directly to the event/deadline-driven runtime coordinator and first real arXiv adapter. Do not add another ad-hoc source-key representation.
 
-Issue #6 tracks the broader performance-budget/refactor discipline. Issue #15 tracks Cargo lockfile/cache/reproducibility work separately.
+Independent maintenance branch: `ci-lockfile-bootstrap`.
+Independent maintenance PR: #25.
+
+PR #25 now contains the generated `src-tauri/Cargo.lock`; its temporary bootstrap workflow deleted itself after generating the file. The normal Linux/Windows/macOS workflows verify `cargo metadata --locked` and run `cargo test` / `cargo check` with `--locked`. Build caching remains a later, separately measured step so reproducibility and cache-speed effects are not conflated.
+
+Issue #3 is closed in GitHub, but `docs/PERF_BASELINE.md` still correctly records the **real desktop Idle CPU/RSS baseline as pending**. Do not interpret the closed issue as a measured baseline. Issue #6 owns the broader performance-budget/refactor discipline.
+
+## CI working rule
+
+Windows/macOS cold CI can take around tens of minutes. Do not spend an active development session continuously polling a slow run.
+
+- once a PR is structurally ready, let its workflows run while independent work continues
+- check CI at logical checkpoints, before merge, or when a failure notification/result becomes relevant
+- never weaken or skip platform checks merely to shorten the wait
+- do not stack dependent feature branches merely to stay busy; independent work may proceed on a separate clean branch
+
+This rule exists to avoid wasting development time while preserving the requirement that merge candidates finish green on Linux, Windows, and macOS.
 
 ## Branch hygiene
 
-Keep the repository close to `main + one active feature branch` whenever practical.
+Keep the repository close to `main + one active feature branch`, with a second branch only when the work is genuinely independent (for example current PR #25 CI maintenance).
 
-- after a feature PR is merged or superseded, delete its branch
-- do not keep stacked/temporary branches once their clean replacement exists
-- do not reuse an old feature branch for unrelated work
-- before creating a new branch, prefer branching from current `main`
+- after a feature PR is merged or superseded, delete its branch when tooling permits
+- do not reuse old feature branches for unrelated work
+- branch new product work from current `main`
+- do not build Issue #21 on top of PR #24 unless necessary; after #24 merges, start the runtime slice from fresh `main`
 
-As of 2026-09-13, several old branches still exist because the connected GitHub tool currently exposes branch listing/update but not branch-ref deletion. They are obsolete and may be deleted safely once a deletion-capable path is available:
+Known obsolete branches that may be deleted safely when a deletion-capable path is available:
 
 - `ci/cross-platform`
 - `feat/bootstrap-tauri`
@@ -54,31 +71,29 @@ As of 2026-09-13, several old branches still exist because the connected GitHub 
 - `feat/shortcut-badge`
 - `perf/idle-baseline-tools`
 - `feat/cache-scheduler`
-
-Do not base new work on those branches.
+- `feat/cache-ui`
+- `feat-cache-ui`
 
 ## Cross-platform CI knowledge
 
-The workflows are deliberately separate rather than one matrix job:
+The workflows are deliberately separate:
 
 - `.github/workflows/ci.yml` -> `CI / Linux`
 - `.github/workflows/ci-windows.yml` -> `CI / Windows`
 - `.github/workflows/ci-macos.yml` -> `CI macOS`
 
-Each OS validates frontend production build, Rust tests/check, and `npm run tauri build -- --no-bundle --ci`. Linux additionally owns rustfmt and the Linux performance-helper syntax check.
-
-PR #18 finished green on all three platforms, including the Tauri release build.
+Each OS validates frontend production build, Rust tests/check, and `npm run tauri build -- --no-bundle --ci`. Linux additionally owns rustfmt and the Linux performance-helper syntax check. PR #22 passed all three before merge.
 
 ### Windows icon incident
 
-The first Windows run failed because `tauri-build` requires `src-tauri/icons/icon.ico` when generating Windows executable resources. Linux/macOS did not expose the requirement.
+`tauri-build` requires `src-tauri/icons/icon.ico` when generating Windows executable resources, including during Cargo tests because the build script runs there.
 
 Repository policy:
 
 - canonical visual source remains `src-tauri/icons/icon.png`
-- `src-tauri/icons/icon.ico.b64` stores the equivalent Windows ICO in text form because the repository connector cannot reliably write binary blobs
+- `src-tauri/icons/icon.ico.b64` stores the equivalent Windows ICO as text
 - `scripts/decode_windows_icon.ps1` materializes `src-tauri/icons/icon.ico`
-- Windows CI runs the helper before any Cargo command; even `cargo test` executes `tauri-build`
+- Windows CI runs the helper before any Cargo command
 - generated `src-tauri/icons/icon.ico` is ignored by Git
 
 For a fresh Windows checkout:
@@ -91,59 +106,126 @@ before direct Cargo commands.
 
 CI compile/link/configuration validation is not a substitute for real GUI interaction tests or signing/installer tests.
 
-## Cache/scheduler implementation knowledge
+## Cache and source identity
 
-### Schema v3
+### Schema v4
 
-`feed_items` stores common cache fields plus `payload_json` for source-specific metadata. `source_refresh_state` reserves persisted HTTP validator/backoff state (`last_attempt`, `last_success`, failure count, blocked-until, ETag, Last-Modified).
+Schema v3 introduced `feed_items` and `source_refresh_state`. Schema v4 changes cached-item identity to `(source_kind, source_config_json, id)`.
 
-Existing settings and Board layout survive v1/v2 -> v3 migration. Keep migration tests when the schema changes.
+The same external item can legitimately be selected by multiple source configurations. For example, one arXiv paper can match two queries. A global `id` primary key would make one query collide with or overwrite the other.
 
-The demo cache is seeded only once, guarded by `cache.demo_seeded_v1`. Do not reseed on every launch because deleted/replaced demo data must not reappear forever.
+Keep these semantics:
 
-### Scheduler core
+- cache row identity: `(source_kind, canonical source_config_json, external item id)`
+- global/top presentation: deduplicate identical external item ids
+- seen state: currently global by external item id; seeing one copy marks all cached copies seen
+- source-specific cache reads: exact source kind + canonical config
 
-`src-tauri/src/scheduler.rs` is deliberately pure Rust: no Tauri, SQLite, HTTP, timers, or wall-clock calls inside decision logic.
+The demo cache is seeded only once, guarded by `cache.demo_seeded_v1`. Do not reseed on every launch.
 
-A source instance is keyed by `(source_kind, source_config_json)`, not widget id. Equivalent widget dependencies must deduplicate into one pending refresh.
+### Canonical source config
+
+`src-tauri/src/source_config.rs` is the canonical boundary for source config JSON.
+
+- input must be a JSON object and is bounded to 16 KiB
+- object keys are recursively sorted
+- array order is preserved
+- output is compact JSON
+- scheduler `SourceKey::new` canonicalizes before constructing a key
+- source-specific cache reads canonicalize before querying SQLite
+
+Future widget configuration writes and adapter cache writes must store the same canonical representation. Do not compare raw user-entered JSON strings as source identity.
+
+## Scheduler core
+
+`src-tauri/src/scheduler.rs` is deliberately pure decision logic: no Tauri, SQLite, HTTP, timers, or wall-clock calls inside it.
+
+A source instance is keyed by `(source_kind, canonical source_config_json)`, not widget id. Equivalent widget dependencies must deduplicate into one pending refresh.
 
 Current invariants:
 
 - default automatic interval: 1 hour
-- persisted setting key: `refresh.auto_interval_seconds`
-- persisted value `off` means automatic refresh disabled
-- allowed automatic interval: 5 minutes .. 24 hours
+- setting key: `refresh.auto_interval_seconds`
+- `off` means automatic refresh disabled
+- numeric range: 5 minutes .. 24 hours
 - manual refresh remains possible with auto OFF
 - background concurrency starts at 2
 - manual request upgrades an already queued auto request instead of duplicating it
-- failures use exponential backoff, starting at 60 s and capped at 6 h
-- blocked sources are not started before their blocked-until boundary
+- failures use exponential backoff starting at 60 s and capped at 6 h
+- blocked sources do not start before `blocked_until`
 
-The runtime coordinator is not implemented yet. When it is added, use event/deadline wakeups rather than frequent polling. Actual HTTP waits should use async I/O, not a permanently occupied OS thread.
+The runtime coordinator is not implemented yet. It must use event/deadline wakeups rather than frequent polling. HTTP waits must use async I/O.
 
-### Tauri command macro boundary
+**Locking rule:** never hold the scheduler mutex across SQLite or HTTP work. Snapshot/pop a scheduling decision, release the lock, perform DB/network I/O, then reacquire only to commit success/failure. This avoids scheduler -> DB lock inversion and foreground commands waiting behind network latency.
 
-Keep `#[tauri::command]` functions registered from the module where the macro is defined. Re-exporting those functions from `commands/mod.rs` and passing the re-exported path to `generate_handler!` caused the generated command marker symbols to be unresolved in PR #19. Use paths such as `commands::cache_refresh::get_refresh_settings` instead.
+## arXiv constraints already established for Issue #21
 
-### Cache-first startup
+Preserve the policy recorded on Issue #21 for the legacy arXiv API:
 
-`lib.rs` opens/migrates SQLite and ensures the one-time cache seed before the frontend is usable. No network request is part of startup.
+- response is Atom 1.0
+- automatic arXiv refresh is source-clamped to 24 h
+- serialize legacy API requests and enforce at least a 3 s request gate
+- do not invent ETag / Last-Modified behavior if the endpoint does not document it
+- manual refresh may exist while auto is OFF, but still respects the hard arXiv request gate
 
-The cache/UI boundary introduced in PR #22 is intentionally narrow:
+The first real adapter must normalize results into schema v4 and emit narrow cache-change signals rather than forcing a full Board render.
 
-- Compact invokes `list_cached_items` only when Compact is rendered.
-- Board invokes `list_cached_items_for_source` only for source/config pairs represented by current widgets.
-- cache results update the specific Compact feed or widget content nodes through DOM APIs
-- shell-status changes update only the relevant visible shell element; they must not cause a whole-Board rebuild because that can destroy an active drag/resize/settings interaction
-- current cached image fields are URLs, not locally stored image bytes, so offline startup must still remain useful from cached text if image fetches fail
+## Cache-first UI boundary
 
-When runtime refresh later changes cache contents, preserve this narrow-update pattern rather than calling the top-level `render()` for every cache event.
+`lib.rs` opens/migrates SQLite and ensures the one-time cache seed before frontend use. Network completion is never part of startup.
+
+PR #22 established a narrow cache/UI boundary:
+
+- Compact reads cached top items only when Compact is rendered
+- Board reads cache only for source/config pairs represented by current widgets
+- async cache results update specific content nodes, not the whole Board
+- shell-status changes update only relevant visible shell elements
+- external feed titles/authors/URLs use DOM properties / `textContent`, not trusted `innerHTML`
+- image URLs may fail offline; cached text still needs to remain useful
+
+When runtime refresh begins changing cache contents, emit a targeted cache/content event and preserve this update pattern.
+
+## Tauri command macro boundary
+
+Keep `#[tauri::command]` functions registered from the module where the macro is defined. Re-exporting command functions and registering the re-exported path caused generated command marker symbols to be unresolved in PR #19. Use paths such as `commands::cache_refresh::get_refresh_settings`.
+
+## Shortcut / shell status invariants
+
+Default shortcut: `CmdOrCtrl+Shift+Space`.
+
+- persisted key: `shell.global_shortcut`
+- publish/manage `AppState` before OS shortcut registration
+- serialize changes with `AppState.shortcut_change`
+- replacement order: register new -> unregister old -> persist new
+- conflict/parse failure leaves the old shortcut intact
+- persistence failure attempts runtime rollback
+- never silently register fallback shortcuts
+- shortcut ownership stays in Rust
+
+`ShellStatus` is orthogonal to `ViewState` and owns `has_unseen`, configured shortcut, and shortcut registration error. The frontend reflects it but is not the source of truth.
+
+Do not re-render the whole Board on shell/cache events; that can destroy active drag/resize/settings interaction.
+
+## Board implementation knowledge
+
+Board drag/resize updates DOM during pointer movement and persists geometry once at gesture end. Do not write SQLite on every pointer move.
+
+The frontend remains Vanilla TypeScript. Do not add React/Vue/Svelte, a grid engine, or canvas dependency for current interactions.
+
+Cached content must remain separate from geometry persistence. Hydration must not replace widget elements or reset pointer gestures; update only the widget content node.
+
+## Rust temporary-lifetime pitfall
+
+Two prior `E0597` incidents came from tail expressions retaining a borrow/temporary longer than expected:
+
+- PR #12: `query_map(...).collect()` relative to a prepared statement
+- PR #16: tail `match state.shell.lock()` relative to Tauri `State`
+
+When this family of error appears, first make destruction order explicit with a local binding or terminating semicolon before redesigning ownership.
 
 ## Idle baseline procedure
 
-Use a release build. Do not use `tauri dev` or CI numbers as the resident-product baseline.
-
-Canonical Linux run:
+Use a release build, not `tauri dev` or CI numbers.
 
 ```bash
 npm install
@@ -153,54 +235,21 @@ APP_PID=$!
 python3 scripts/measure_idle_linux.py --pid "$APP_PID" --settle 60 --duration 300 --interval 1 --csv /tmp/dopagaki-idle.csv
 ```
 
-Keep the app in Idle with no interaction during settle/sample. `docs/PERF_BASELINE.md` contains the full metric definitions and condition template.
+Keep the app in Idle with no interaction during settle/sample. `docs/PERF_BASELINE.md` defines the metric semantics and condition template. The helper includes WebKit descendants and reports conservative summed RSS plus PSS where readable.
 
-The Linux helper recursively samples the root process plus descendants so WebKit subprocesses are included. It reports conservative summed RSS and, where readable, process-tree PSS. It deliberately does not fake per-process network bytes from `/proc/<pid>/net/dev`, because that file is network-namespace scoped rather than PID-attributed.
+As of 2026-09-13, the real desktop baseline is still pending. Do not substitute CI/dev estimates.
 
-## Shortcut implementation and invariants
+## CI reproducibility / Issue #15
 
-The default is `CmdOrCtrl+Shift+Space`. The underlying `global-hotkey` parser accepts `CmdOrCtrl` as a cross-platform alias.
+PR #25 is the lockfile/reproducibility slice:
 
-- persisted setting key: `shell.global_shortcut`
-- publish/manage `AppState` before OS shortcut registration so the plugin callback cannot observe missing managed state
-- serialize runtime shortcut changes with `AppState.shortcut_change`
-- replace bindings non-destructively: register new -> unregister old -> persist new
-- ordinary parse/conflict failure leaves the old working shortcut intact
-- persistence failure attempts to remove the new binding and restore the old runtime binding
-- retrying the same configured shortcut can clear a prior registration error without rewriting SQLite
-- never silently register fallback shortcuts
-- shortcut registration/persistence remains Rust-owned; do not add the JavaScript global-shortcut plugin
+- commit `src-tauri/Cargo.lock`
+- verify lock consistency early with `cargo metadata --locked`
+- use `--locked` for Rust test/check on all three OSes
+- keep the existing Tauri release build
+- evaluate build caching in a later measured change, using previous cold timings as before-values
 
-## Shell status / unseen badge
-
-`ShellStatus` is orthogonal to `ViewState` and currently contains `has_unseen`, configured global shortcut, and active registration error. The frontend reflects it but is not the source of truth.
-
-Do not re-render the whole Board on shell/cache events; doing so can destroy an active drag/resize/settings interaction. PR #22 changes the shell-status listener to update the Idle badge or active shortcut controls narrowly and leaves Board geometry/content DOM intact.
-
-## Rust temporary-lifetime pitfall
-
-Two PRs exposed the same family of `E0597` surprises:
-
-- PR #12: tail `query_map(...).collect()` relative to a prepared statement
-- PR #16: tail `match state.shell.lock()` relative to Tauri `State`
-
-When a guard/iterator/borrow-producing tail expression triggers a surprising lifetime error, first make destruction order explicit with a local binding or terminating semicolon. Do not redesign ownership unless necessary.
-
-## Board implementation knowledge
-
-Board drag/resize updates DOM during pointer movement and persists geometry once at gesture end. Do not write SQLite on every pointer move.
-
-The frontend remains Vanilla TypeScript. Do not add React/Vue/Svelte, a grid engine, or canvas dependency for current interactions.
-
-Schema v2/v3 keeps `source_config_json` and `refresh_config_json`; use these unless a concrete adapter requirement justifies typed relational columns.
-
-Cached feed content must remain separate from geometry persistence. Hydrating content must not replace widget elements or reset pointer gestures; update only each widget's `[data-widget-content]` node.
-
-## CI follow-up
-
-Issue #15 tracks missing `Cargo.lock` and repeated Rust dependency resolution/build cost. Three independent OS workflows make cold-build cost more visible, but correctness was established without cache first so the current runs are useful before-values.
-
-First commit the executable lockfile and use `--locked`; evaluate build caching separately so dependency reproducibility and cache benefit are not conflated.
+Do not mix Cargo cache experimentation into product feature PRs.
 
 ## Repository-memory protocol
 
@@ -212,15 +261,17 @@ First commit the executable lockfile and use `--locked`; evaluate build caching 
 - feature acceptance/progress: Issues and PRs
 - agent discipline: `AGENTS.md`
 
-Meta tracking issue: #13.
+Meta issue: #13.
 
-When reusable knowledge would otherwise exist only in chat, update the appropriate GitHub document in the same feature batch.
+When reusable knowledge would otherwise exist only in chat, update the appropriate repository document in the same feature batch.
 
 ## Restart checklist
 
 1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Inspect PR #22 plus Issues #3, #5, #6, #15, #20, and #21.
-3. If #22 is open, require frontend build plus Linux/Windows/macOS Rust/Tauri CI green; fix failures rather than weakening checks.
-4. Merge #22 once green and close Issue #20 if its acceptance criteria remain satisfied.
-5. Start Issue #21 from fresh `main`: event/deadline coordinator + first arXiv adapter, keeping scheduler locks away from DB/HTTP I/O.
-6. Run the real release-build Idle baseline when a desktop session is available and record it in `docs/PERF_BASELINE.md`; close Issue #3 only then.
+2. Inspect PR #24 and PR #25 plus Issues #5, #6, #15, and #21.
+3. Do not sit idle polling macOS/Windows CI. Continue independent work and check each PR at a logical merge checkpoint.
+4. Merge #24 only after all required CI is green; then start the runtime coordinator from fresh `main`.
+5. Implement arXiv through the canonical source-key/cache boundary, with event/deadline wakeups and no scheduler lock held across DB/network I/O.
+6. Merge #25 separately once its locked-CI checks are green; evaluate Rust build caching afterward as a separate measured change.
+7. Emit targeted cache/content changes rather than rebuilding the Board on every refresh.
+8. Run and record the real release-build Idle baseline when a desktop session is available.

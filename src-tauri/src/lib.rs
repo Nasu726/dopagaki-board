@@ -2,6 +2,7 @@ mod app;
 mod commands;
 mod db;
 mod scheduler;
+mod source_config;
 
 use std::{
     fs,

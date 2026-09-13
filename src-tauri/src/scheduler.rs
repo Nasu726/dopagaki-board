@@ -1,3 +1,4 @@
+use crate::source_config;
 use std::collections::HashMap;
 
 pub(crate) const AUTO_REFRESH_SETTING_KEY: &str = "refresh.auto_interval_seconds";
@@ -17,11 +18,13 @@ impl SourceKey {
     pub(crate) fn new(
         source_kind: impl Into<String>,
         source_config_json: impl Into<String>,
-    ) -> Self {
-        Self {
-            source_kind: source_kind.into(),
-            source_config_json: source_config_json.into(),
-        }
+    ) -> Result<Self, String> {
+        let source_kind = source_kind.into();
+        let source_config_json = source_config::canonicalize(&source_config_json.into())?;
+        Ok(Self {
+            source_kind,
+            source_config_json,
+        })
     }
 }
 
@@ -249,7 +252,17 @@ mod tests {
     use super::*;
 
     fn key(name: &str) -> SourceKey {
-        SourceKey::new(name, "{}")
+        SourceKey::new(name, "{}").expect("test source config should canonicalize")
+    }
+
+    #[test]
+    fn source_keys_collapse_equivalent_json_objects() {
+        let first = SourceKey::new("arxiv", r#"{"query":"graph","max":10}"#)
+            .expect("first source config should canonicalize");
+        let second = SourceKey::new("arxiv", r#"{ "max": 10, "query": "graph" }"#)
+            .expect("second source config should canonicalize");
+        assert_eq!(first, second);
+        assert_eq!(first.source_config_json, r#"{"max":10,"query":"graph"}"#);
     }
 
     #[test]

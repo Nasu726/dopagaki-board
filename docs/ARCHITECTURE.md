@@ -69,7 +69,7 @@ application start
 
 Network completion is never on the startup critical path.
 
-Schema v3 introduces `feed_items` and `source_refresh_state`. The initial implementation seeds a small persistent demo cache exactly once so the cache-first path can be exercised before real adapters exist. Demo data must not be reinserted on every launch after a user removes or replaces it.
+Schema v3 introduced `feed_items` and `source_refresh_state`. Schema v4 changes cached-item identity from a globally unique `id` to `(source_kind, source_config_json, id)`, because the same external item can legitimately belong to multiple source/query configurations. The initial implementation seeds a small persistent demo cache exactly once so the cache-first path can be exercised before real adapters exist. Demo data must not be reinserted on every launch after a user removes or replaces it.
 
 ## SQLite
 
@@ -88,6 +88,8 @@ Minimum data domains:
 Do not over-design schema/migrations before real adapters exist.
 
 `feed_items.payload_json` exists as an escape hatch for source-specific metadata while common fields stay queryable. Do not immediately normalize every future adapter field into columns.
+
+Cached rows are source-instance scoped. A normalized external item id may therefore appear in several rows when multiple source configurations select the same item. Compact/global ranking must deduplicate identical external item ids so overlapping queries do not surface the same content repeatedly. Seen-state updates intentionally apply to every row with the same item id, so seeing an item through one query also marks its copies seen elsewhere.
 
 ## Scheduler model
 
@@ -136,7 +138,7 @@ Adapters may expose capabilities/policy such as:
 
 - minimum refresh interval
 - manual refresh cooldown
-- quota/budget hints
+- budget/quota hints
 - retry-after
 - backoff state
 - whether conditional HTTP is supported

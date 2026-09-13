@@ -1,3 +1,4 @@
+pub(crate) mod cache;
 mod migrations;
 pub(crate) mod widgets;
 

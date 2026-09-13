@@ -44,11 +44,14 @@ jobs:
       - name: Rust format check
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
+      - name: Verify locked Rust dependencies
+        run: cargo metadata --locked --manifest-path src-tauri/Cargo.toml --no-deps --format-version 1 > /dev/null
+
       - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Rust check
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Tauri release build
         run: npm run tauri build -- --no-bundle --ci

@@ -41,7 +41,9 @@ pub fn run() {
                 let state = app.state::<app::AppState>();
                 match state.shell.lock() {
                     Ok(mut shell) => shell.global_shortcut_error = Some(message),
-                    Err(_) => eprintln!("global shortcut registration failed and shell state lock was poisoned"),
+                    Err(_) => eprintln!(
+                        "global shortcut registration failed and shell state lock was poisoned"
+                    ),
                 }
             }
 

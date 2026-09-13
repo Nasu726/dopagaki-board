@@ -1,6 +1,6 @@
 # Roadmap
 
-Current checkpoint (2026-09-14): the runnable shell, state loop, free-form Board, cache/scheduler, and first real arXiv adapter are implemented. The first deliberate post-runtime simplification pass is Issue #28. A reproducible desktop performance procedure exists, but the actual numeric Idle CPU/RSS baseline is still pending and must not be reconstructed from CI or estimates.
+Current checkpoint (2026-09-14): the runnable shell, state loop, free-form Board, cache/scheduler, first real arXiv adapter, and first simplification pass are implemented. Issue #35 adds editable widget source configuration and is the final planned MVP feature slice before a first-complete usability checkpoint. A reproducible desktop performance procedure exists, but the actual numeric Idle CPU/RSS baseline is still pending and must not be reconstructed from CI or estimates.
 
 ## Phase 0 — durable specification
 
@@ -67,6 +67,7 @@ Primary issue #5 is complete.
 Suggested order:
 
 1. [x] arXiv — async Atom metadata adapter, source-specific 24 h automatic-refresh floor, serialized request gate.
+   - [ ] Editable query/result-count UI (#35; in progress).
 2. [ ] YouTube — groups/subscribed channels, thumbnails, recommendation heuristic, quota awareness.
 3. [ ] Wikipedia/Wikimedia — daily featured/on-this-day/random discovery.
 4. [ ] NHK.
@@ -107,7 +108,7 @@ This phase is recurring rather than strictly end-loaded.
 4. fix friction observed in real use
 5. repeat reduction pass
 
-Issue #28 is the first explicit post-runtime deletion/refactor slice. Parent tracking: #6.
+Issue #28 completed the first explicit post-runtime deletion/refactor slice. Parent tracking remains #6.
 
 ## Phase 9 — native decision
 

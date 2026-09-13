@@ -2,7 +2,7 @@ use super::publish_shell_status;
 use crate::{
     app::{AppState, ShellStatus},
     db::{self, cache::CachedItem},
-    refresh_settings, runtime, source_config,
+    refresh_settings, runtime, sources,
 };
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -71,7 +71,7 @@ pub(crate) fn list_cached_items_for_source(
     if source_kind.trim().is_empty() || source_kind.len() > 64 {
         return Err("invalid source kind".to_owned());
     }
-    let source_config_json = source_config::canonicalize(&source_config_json)?;
+    let source_config_json = sources::normalize_config(&source_kind, &source_config_json)?;
 
     let connection = state
         .db

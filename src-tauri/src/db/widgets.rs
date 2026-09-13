@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -20,23 +20,18 @@ pub(crate) fn list(connection: &Connection) -> Result<Vec<WidgetLayout>> {
         "SELECT id, source_kind, source_config_json, refresh_config_json, x, y, width, height, display_mode\n         FROM widgets\n         ORDER BY id",
     )?;
 
-    let widgets = statement
-        .query_map([], |row| {
-            Ok(WidgetLayout {
-                id: row.get(0)?,
-                source_kind: row.get(1)?,
-                source_config_json: row.get(2)?,
-                refresh_config_json: row.get(3)?,
-                x: row.get(4)?,
-                y: row.get(5)?,
-                width: row.get(6)?,
-                height: row.get(7)?,
-                display_mode: row.get(8)?,
-            })
-        })?
-        .collect();
-
+    let widgets = statement.query_map([], map_widget)?.collect();
     widgets
+}
+
+pub(crate) fn get(connection: &Connection, id: i64) -> Result<Option<WidgetLayout>> {
+    connection
+        .query_row(
+            "SELECT id, source_kind, source_config_json, refresh_config_json, x, y, width, height, display_mode\n             FROM widgets\n             WHERE id = ?1",
+            [id],
+            map_widget,
+        )
+        .optional()
 }
 
 pub(crate) fn create(
@@ -80,8 +75,34 @@ pub(crate) fn update_geometry(
     Ok(changed == 1)
 }
 
+pub(crate) fn update_source_config(
+    connection: &Connection,
+    id: i64,
+    source_config_json: &str,
+) -> Result<bool> {
+    let changed = connection.execute(
+        "UPDATE widgets SET source_config_json = ?2 WHERE id = ?1",
+        params![id, source_config_json],
+    )?;
+    Ok(changed == 1)
+}
+
 pub(crate) fn delete(connection: &Connection, id: i64) -> Result<bool> {
     Ok(connection.execute("DELETE FROM widgets WHERE id = ?1", params![id])? == 1)
+}
+
+fn map_widget(row: &rusqlite::Row<'_>) -> Result<WidgetLayout> {
+    Ok(WidgetLayout {
+        id: row.get(0)?,
+        source_kind: row.get(1)?,
+        source_config_json: row.get(2)?,
+        refresh_config_json: row.get(3)?,
+        x: row.get(4)?,
+        y: row.get(5)?,
+        width: row.get(6)?,
+        height: row.get(7)?,
+        display_mode: row.get(8)?,
+    })
 }
 
 #[cfg(test)]
@@ -89,10 +110,15 @@ mod tests {
     use super::*;
     use crate::db::migrations;
 
-    #[test]
-    fn widget_geometry_roundtrip_works() {
+    fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("SQLite should open");
         migrations::run(&connection).expect("migration should succeed");
+        connection
+    }
+
+    #[test]
+    fn widget_geometry_roundtrip_works() {
+        let connection = database();
 
         let widget = create(&connection, "youtube", 12.0, 18.0, 280.0, 180.0)
             .expect("widget should be created");
@@ -112,5 +138,25 @@ mod tests {
 
         assert!(delete(&connection, widget.id).expect("widget should delete"));
         assert!(list(&connection).expect("widgets should list").is_empty());
+    }
+
+    #[test]
+    fn source_config_updates_without_touching_geometry() {
+        let connection = database();
+        let widget = create(&connection, "arxiv", 12.0, 18.0, 280.0, 180.0)
+            .expect("widget should be created");
+
+        assert!(
+            update_source_config(&connection, widget.id, r#"{"query":"cat:cs.LG"}"#)
+                .expect("source config should update")
+        );
+        let updated = get(&connection, widget.id)
+            .expect("widget should read")
+            .expect("widget should exist");
+        assert_eq!(updated.source_config_json, r#"{"query":"cat:cs.LG"}"#);
+        assert_eq!(updated.x, 12.0);
+        assert_eq!(updated.y, 18.0);
+        assert_eq!(updated.width, 280.0);
+        assert_eq!(updated.height, 180.0);
     }
 }

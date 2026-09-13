@@ -129,7 +129,10 @@ mod tests {
     #[test]
     fn cache_limit_is_bounded() {
         assert_eq!(validate_cache_limit(1).unwrap(), 1);
-        assert_eq!(validate_cache_limit(MAX_CACHE_LIMIT).unwrap(), MAX_CACHE_LIMIT);
+        assert_eq!(
+            validate_cache_limit(MAX_CACHE_LIMIT).unwrap(),
+            MAX_CACHE_LIMIT
+        );
         assert!(validate_cache_limit(0).is_err());
         assert!(validate_cache_limit(MAX_CACHE_LIMIT + 1).is_err());
     }

@@ -20,7 +20,7 @@ pub(crate) fn list(connection: &Connection) -> Result<Vec<WidgetLayout>> {
         "SELECT id, source_kind, source_config_json, refresh_config_json, x, y, width, height, display_mode\n         FROM widgets\n         ORDER BY id",
     )?;
 
-    statement
+    let widgets = statement
         .query_map([], |row| {
             Ok(WidgetLayout {
                 id: row.get(0)?,
@@ -34,7 +34,9 @@ pub(crate) fn list(connection: &Connection) -> Result<Vec<WidgetLayout>> {
                 display_mode: row.get(8)?,
             })
         })?
-        .collect()
+        .collect();
+
+    widgets
 }
 
 pub(crate) fn create(

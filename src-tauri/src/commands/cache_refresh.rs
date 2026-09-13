@@ -2,9 +2,7 @@ use super::publish_shell_status;
 use crate::{
     app::{AppState, ShellStatus},
     db::{self, cache::CachedItem},
-    scheduler::{
-        SourceKey, AUTO_REFRESH_SETTING_KEY, DEFAULT_AUTO_REFRESH_SECONDS,
-    },
+    scheduler::{SourceKey, AUTO_REFRESH_SETTING_KEY, DEFAULT_AUTO_REFRESH_SECONDS},
 };
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,9 +20,7 @@ pub(crate) struct RefreshSettings {
 }
 
 #[tauri::command]
-pub(crate) fn get_refresh_settings(
-    state: State<'_, AppState>,
-) -> Result<RefreshSettings, String> {
+pub(crate) fn get_refresh_settings(state: State<'_, AppState>) -> Result<RefreshSettings, String> {
     let connection = state
         .db
         .lock()
@@ -168,7 +164,9 @@ fn validate_auto_interval(value: Option<u64>) -> Result<(), String> {
         {
             Ok(())
         }
-        Some(_) => Err("automatic refresh must be OFF or between 5 minutes and 24 hours".to_owned()),
+        Some(_) => {
+            Err("automatic refresh must be OFF or between 5 minutes and 24 hours".to_owned())
+        }
     }
 }
 
@@ -218,6 +216,9 @@ mod tests {
         migrations::run(&connection).expect("migration should succeed");
         db::set_setting(&connection, AUTO_REFRESH_SETTING_KEY, "off")
             .expect("setting should write");
-        assert_eq!(read_auto_interval(&connection).expect("setting should read"), None);
+        assert_eq!(
+            read_auto_interval(&connection).expect("setting should read"),
+            None
+        );
     }
 }

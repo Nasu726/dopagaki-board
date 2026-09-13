@@ -154,6 +154,20 @@ Size presets belong to layout/display logic, not the state machine.
 
 Compact external launch collapses to Idle. Board external launch keeps Board open.
 
+## Shell status vs. view state
+
+Do not expand `ViewState` with unrelated runtime flags. Window/navigation state and shell status have different lifecycles.
+
+Rust-owned shell status currently contains:
+
+- boolean unseen/update indicator
+- configured global shortcut
+- active shortcut registration error, if the configured binding could not be registered
+
+The frontend reads this status and renders it; it does not become the source of truth. Future feed/scheduler code should change the unseen boolean through the Rust-owned state path rather than inventing a second frontend badge state.
+
+Global shortcut configuration is persisted in the existing SQLite `settings` table. A shortcut replacement must be non-destructive: register the requested new binding before removing the known-working old binding, persist only after the runtime swap succeeds, and do not silently try fallback shortcuts.
+
 ## Board persistence
 
 Persist at least:

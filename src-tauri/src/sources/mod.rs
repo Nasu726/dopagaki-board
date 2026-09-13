@@ -1,9 +1,28 @@
 pub(crate) mod arxiv;
 
+use crate::source_config;
+
 pub(crate) const ARXIV_AUTO_REFRESH_SECONDS: u64 = 24 * 60 * 60;
 
 pub(crate) fn is_supported(source_kind: &str) -> bool {
     source_kind == "arxiv"
+}
+
+pub(crate) fn normalize_config(source_kind: &str, input: &str) -> Result<String, String> {
+    let canonical = source_config::canonicalize(input)?;
+    match source_kind {
+        "arxiv" => arxiv::normalize_config(&canonical),
+        _ => Ok(canonical),
+    }
+}
+
+pub(crate) fn normalize_editable_config(source_kind: &str, input: &str) -> Result<String, String> {
+    match source_kind {
+        "arxiv" => normalize_config(source_kind, input),
+        _ => Err(format!(
+            "{source_kind} does not have editable source settings yet"
+        )),
+    }
 }
 
 pub(crate) fn effective_auto_interval(
@@ -20,6 +39,31 @@ pub(crate) fn effective_auto_interval(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arxiv_source_identity_uses_semantic_normalization() {
+        assert_eq!(
+            normalize_config(
+                "arxiv",
+                r#"{ "maxResults": 12, "query": "cat:cs.AI" }"#
+            )
+            .unwrap(),
+            "{}"
+        );
+        assert_eq!(
+            normalize_config("arxiv", r#"{"query":"cat:cs.LG"}"#).unwrap(),
+            r#"{"query":"cat:cs.LG"}"#
+        );
+    }
+
+    #[test]
+    fn non_adapter_configs_still_receive_generic_canonicalization() {
+        assert_eq!(
+            normalize_config("youtube", r#"{ "z": 1, "a": 2 }"#).unwrap(),
+            r#"{"a":2,"z":1}"#
+        );
+        assert!(normalize_editable_config("youtube", "{}").is_err());
+    }
 
     #[test]
     fn arxiv_automatic_refresh_is_clamped_to_daily() {

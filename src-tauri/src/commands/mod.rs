@@ -101,6 +101,10 @@ pub(crate) fn set_global_shortcut(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<ShellStatus, String> {
+    let _change_guard = state
+        .shortcut_change
+        .lock()
+        .map_err(|_| "shortcut change lock was poisoned".to_owned())?;
     let requested = normalize_shortcut(&shortcut)?;
     let previous = read_shell_status(&state)?;
     let shortcuts = app.global_shortcut();
@@ -116,7 +120,6 @@ pub(crate) fn set_global_shortcut(
             }
         }
 
-        persist_shortcut(&state, &requested)?;
         let next = update_shortcut_status(&state, requested, None)?;
         publish_shell_status(&app, &next);
         return Ok(next);

@@ -14,7 +14,10 @@ pub(crate) struct SourceKey {
 }
 
 impl SourceKey {
-    pub(crate) fn new(source_kind: impl Into<String>, source_config_json: impl Into<String>) -> Self {
+    pub(crate) fn new(
+        source_kind: impl Into<String>,
+        source_config_json: impl Into<String>,
+    ) -> Self {
         Self {
             source_kind: source_kind.into(),
             source_config_json: source_config_json.into(),

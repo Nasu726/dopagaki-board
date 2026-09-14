@@ -50,7 +50,7 @@ pub(crate) async fn fetch(
 ) -> Result<Vec<CacheWriteItem>, String> {
     let config = parse_config(canonical_source_config_json)?;
     if config.channel_id.is_empty() {
-        return Err("YouTube channelId must be configured before refresh".to_owned());
+        return Ok(Vec::new());
     }
     let response = http
         .get("https://www.youtube.com/feeds/videos.xml")
@@ -164,7 +164,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_config_is_valid_but_not_refreshable() {
+    fn empty_config_is_valid_for_initial_widget_setup() {
         assert_eq!(normalize_config("{}").unwrap(), "{}");
         assert_eq!(parse_config("{}").unwrap().channel_id, "");
         assert!(normalize_config(r#"{"channelId":"not-a-channel"}"#).is_err());

@@ -341,10 +341,7 @@ fn validate_grid_geometry(x: f64, y: f64, width: f64, height: f64) -> Result<(),
     }
 }
 
-fn rectangles_overlap(
-    first: (f64, f64, f64, f64),
-    second: (f64, f64, f64, f64),
-) -> bool {
+fn rectangles_overlap(first: (f64, f64, f64, f64), second: (f64, f64, f64, f64)) -> bool {
     let (ax, ay, aw, ah) = first;
     let (bx, by, bw, bh) = second;
     ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by

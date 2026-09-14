@@ -52,7 +52,7 @@ PR #52: `Ship real Wikipedia, Qiita, Zenn and YouTube source adapters`
 - PR is intentionally still a draft
 - related issue: #48
 
-The branch currently adds the backend adapter slice for four real public sources, behind the existing scheduler/cache/source-key boundary:
+The branch has backend adapters for four real public sources behind the existing scheduler/cache/source-key boundary:
 
 ### Wikipedia
 
@@ -88,49 +88,57 @@ The branch currently adds the backend adapter slice for four real public sources
 - no placeholder source is intentionally exposed
 - NHK remains absent
 
-## Latest short checkpoint: first substantive CI failure repaired
+## Latest short checkpoint: Wikipedia frontend complete, final CI pending
 
-The formatter failure from the first #52 attempt was repaired earlier by commit `fdf90be73eeaa868ee0510ff3f657cca7fdf4fc3`.
+The first substantive #52 CI regression was a stale unit test, not production behavior. Commit `1dd692beaf1f55342bee6269cfe3154907a4cf18` updates `source_validation_only_accepts_live_adapters` so all five real adapters are accepted while `nhk` and unknown kinds remain rejected.
 
-The next PR head (`8471f60281d368987f84ca86b7e062f3a922a437`) reached Rust tests on all platforms. Linux showed one substantive failure after 63 tests passed:
+Commit `cc049e673614353f8f7849d93acf35cec1ab9de7` implements the first bounded frontend source slice:
 
-`commands::tests::source_validation_only_accepts_live_adapters`
+- add picker now exposes `arxiv` and `wikipedia`
+- Wikipedia gets a dedicated widget editor for `language` and `maxResults`
+- source edits go through `update_widget_source_config`; Rust validation/canonicalization remains authoritative
+- Wikipedia gets inherit/OFF/custom per-widget automatic-refresh controls
+- UI explains the backend >= 6 h automatic refresh floor
+- manual refresh is available even when automatic refresh is OFF
+- successful edits update only the affected widget and rehydrate only its source/config identity
+- arXiv was refactored to share the save plumbing without changing its typed UI
 
-The test still asserted that `youtube` must be rejected even though YouTube is now a real backend adapter. This was stale test data, not a production validation defect.
+Validation on that commit reached:
 
-Commit `1dd692beaf1f55342bee6269cfe3154907a4cf18` repairs the regression test:
+- Linux frontend build: success
+- Linux rustfmt: success
+- Linux locked dependency check: success
+- Linux Rust tests: success
+- Linux Rust check: success
+- Linux Tauri release build had started when the next presentation fix was committed
+- Windows frontend build: success; Rust tests had started
+- macOS frontend build: success; Rust tests had started
 
-- accepts `arxiv`, `wikipedia`, `qiita`, `zenn`, and `youtube`
-- still rejects `nhk`
-- also rejects an unknown source kind
+A presentation review then found a real image/no-image issue in the pre-existing Board row CSS: the fixed two-column grid could leave title content in the narrow first column when no thumbnail existed. Commit `e57331ee437cd7220a8bf53483d951bd1c848de1` switches Board rows to flex layout so an optional 46px image occupies fixed space and text consumes the full remaining width; rows without images use the full row.
 
-A fresh Linux/Windows/macOS CI cycle started successfully after that fix. While it was running, `docs/HANDOFF.md` was reconciled with current `main`, PR #52, and the already-recorded Windows performance observation in commit `31f97f08d82406d35a2fd5af883bdd51df28a635`.
-
-This document update creates a newer head again, so do **not** keep polling the old run IDs. Inspect the CI attached to the current PR #52 head after this commit.
+`docs/HANDOFF.md` was then updated in commit `17b5d75681b3e09da4329e824a6ced05bde881b0`. This `ACTIVE_WORK.md` commit creates the newest head again. Therefore **only CI attached to the current PR #52 head counts as final validation**. Do not poll obsolete run IDs or treat intermediate green steps as merge evidence.
 
 ## What is deliberately NOT complete in PR #52 yet
 
-Do not merge #52 just because the backend compiles. Before merge it still needs:
+Do not merge #52 yet. Remaining work is:
 
-1. frontend add-picker exposure for the newly real adapters
-2. real source-specific widget configuration surfaces; no generic JSON editor
-3. source-aware config validation through the existing Rust command boundary
-4. manual refresh controls for each exposed real adapter
-5. Board presentation check for image/no-image rows
-6. durable decisions/docs where semantics changed
-7. Linux, Windows, and macOS CI green on the final merge candidate
+1. Linux, Windows, and macOS release-build CI green on the current final head
+2. Qiita frontend add/config/manual-refresh slice
+3. Zenn frontend add/config/manual-refresh slice
+4. YouTube frontend add/config/manual-refresh slice
+5. real desktop smoke test of the new source UIs/network presentation when a desktop session is available
+6. final durable documentation/PR-body reconciliation before merge
 
-The current frontend still has `ADDABLE_SOURCE_KINDS = ["arxiv"]`, and the contextual source editor currently handles only arXiv. That remains intentional until each new adapter's real fields are exposed cleanly.
+Wikipedia itself is no longer in the remaining implementation list. Qiita, Zenn, and YouTube intentionally remain hidden from the add picker until their typed configuration UIs exist.
 
 ## Next short batch
 
-1. Inspect CI on the **current** PR #52 head. If another substantive failure exists, fix only that failure first.
-2. If backend CI is green through Rust tests/build, implement the Wikipedia frontend slice only:
-   - add Wikipedia to the add picker
-   - expose widget-local `language` and `maxResults`
-   - use `update_widget_source_config` so Rust's Wikipedia adapter remains authoritative for validation
-   - expose manual refresh for Wikipedia
+1. Inspect CI attached to the current PR #52 head. If a substantive failure exists, fix only that failure first.
+2. If the current head is green through frontend/Rust validation and progressing normally through release builds, begin **Qiita only**:
+   - add Qiita to the add picker
+   - expose `query` + `maxResults` from the actual adapter contract
+   - keep Rust-side normalization/validation authoritative
+   - expose manual refresh and the existing per-widget refresh policy UI
    - preserve narrow widget-only rehydration after save
-   - verify rows remain usable with and without thumbnails
-3. Run frontend build/type validation and the normal three-platform CI before moving to Qiita.
-4. Checkpoint this file again before starting the next source. Do not implement all four frontend configuration UIs in one uninterrupted batch.
+3. Re-run the normal three-platform CI and checkpoint this file before starting Zenn.
+4. Do not implement Qiita, Zenn, and YouTube configuration UIs in one uninterrupted batch.

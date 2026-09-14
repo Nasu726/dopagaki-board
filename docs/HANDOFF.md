@@ -44,21 +44,34 @@ The branch also centralizes a reusable public HTTP client and source-specific au
 
 ### Frontend exposure on PR #52
 
-Wikipedia is now the first new adapter exposed end-to-end in the Board frontend:
+The Board add picker currently exposes four real sources: `arxiv`, `wikipedia`, `qiita`, and `zenn`.
 
-- add picker shows `arxiv` and `wikipedia`
-- Wikipedia widget settings expose typed `language` and `maxResults` controls
-- source edits still pass through `update_widget_source_config`, so Rust adapter validation/canonicalization remains authoritative
-- Wikipedia gets the same per-widget inherit/OFF/custom refresh controls and manual refresh button as arXiv
-- its automatic refresh is clamped by the backend to at least 6 h
-- successful edits update only the widget's in-memory state and content node, then rehydrate that source identity; they do not rebuild the Board
-- Board feed rows use flex layout so both thumbnail and no-thumbnail Wikipedia results consume the row correctly
+- Wikipedia: typed `language` + `maxResults` editor; automatic floor 6 h
+- Qiita: typed optional `query` + `maxResults` editor; automatic floor 1 h
+- Zenn: typed `trend` / `user` / `topic` selector, conditional user/topic value, and `maxResults`; automatic floor 1 h
+- arXiv remains the existing typed query source with automatic floor 24 h
 
-Qiita, Zenn, and YouTube remain backend-only and intentionally absent from the add picker until each gets its own real typed configuration UI. Do not expose them through a generic JSON editor.
+All exposed sources share the same core boundaries:
+
+- source edits pass through `update_widget_source_config`, so Rust adapter validation/canonicalization remains authoritative
+- each widget has inherit/OFF/custom automatic-refresh controls and manual refresh
+- successful edits update the widget's in-memory state and content node, then rehydrate only the affected source identity; they do not rebuild the whole Board
+- Board feed rows use flex layout so thumbnail and no-thumbnail sources consume the row correctly
+
+YouTube remains backend-only and intentionally absent from the add picker. Do not expose it until the open YouTube authentication/quota decision is settled. `docs/DECISIONS.md` still explicitly lists that decision as open, and Issue #48 requires an explicit strategy before exposure.
+
+The current YouTube backend uses selected-channel public RSS rather than the YouTube Data API. That design needs no API key and consumes no Data API quota, but this implementation fact is not itself permission to close the product decision. The user must decide whether public RSS + explicit channel ID is the intended final strategy or whether authenticated/subscription-based behavior is required.
 
 A previous PR #52 head failed all three OS CI jobs for one stale test: `commands::tests::source_validation_only_accepts_live_adapters` still expected YouTube to be unsupported. Commit `1dd692b` updates that regression test to accept the five live backend adapters and reject `nhk` / unknown kinds.
 
-Wikipedia frontend commit `cc049e6` subsequently passed frontend production build on Linux, Windows, and macOS; Linux also passed rustfmt, Rust tests, and Rust check before its release build. Commit `e57331e` then repaired Board rows without thumbnails. Because later documentation commits create newer PR heads, inspect the current head's workflows rather than treating those intermediate results as final merge evidence.
+Frontend checkpoints:
+
+- `cc049e6`: Wikipedia typed frontend slice
+- `e57331e`: Board no-thumbnail row fix
+- `eba91dc`: Qiita typed frontend slice and shared arXiv/Qiita query editor
+- `cb74711`: Zenn typed frontend slice and shared per-widget refresh-section helper
+
+On `cb74711`, macOS passed the frontend production build before the documentation checkpoint and was running Rust tests. Because later documentation commits create newer PR heads, inspect the current head's workflows rather than treating any intermediate result as final merge evidence.
 
 Maintenance note: old stacked PR #39 was superseded by clean PR #41. Accidental duplicate Issues #29-#33 were created during tool setup and immediately closed as not planned.
 
@@ -157,7 +170,9 @@ Issue #35 established the source-editing boundary. Preserve these rules:
 - Board configuration UI is contextual and widget-local; opening or saving it must not rebuild the whole Board
 - after a successful edit, update the in-memory widget config and rehydrate only that widget from the new source identity; later `cache-changed` events continue the normal narrow update path
 
-`main` currently ships the arXiv editor (`query` + `maxResults`, 1..25). PR #52 adds the Wikipedia editor (`language` + `maxResults`, 1..25) using the same command boundary. Continue source-by-source; do not fall back to a generic JSON editor for Qiita/Zenn/YouTube.
+`main` currently ships the arXiv editor (`query` + `maxResults`, 1..25). PR #52 adds typed editors for Wikipedia, Qiita, and Zenn using the same command boundary. Do not fall back to a generic JSON editor for YouTube; expose it only after the YouTube strategy decision and then use its real typed fields.
+
+The arXiv and Qiita query-form path is shared because both expose `query` + bounded results, while source-specific default/query help and hard-refresh-floor messaging remain distinct. Per-widget refresh form construction is also shared across exposed sources; do not fork another copy unless the interaction genuinely differs.
 
 ## Current source adapter policy
 
@@ -167,11 +182,27 @@ Current backend source kinds on PR #52:
 
 - `arxiv`: default query `cat:cs.AI`, default bounded result count, automatic floor 24 h
 - `wikipedia`: default language `ja`, default 12 results, `maxResults` 1..25, language code 2..16 lowercase ASCII letters/hyphen, automatic floor 6 h
-- `qiita`: optional query + bounded result count, automatic floor 1 h
-- `zenn`: typed feed selection for public RSS, automatic floor 1 h
-- `youtube`: selected-channel RSS, automatic floor 1 h
+- `qiita`: optional query (trimmed, <=512 characters), default 12 results, `maxResults` 1..25, automatic floor 1 h
+- `zenn`: `feedType` is `trend`, `user`, or `topic`; user/topic require a nonempty <=80-character safe slug using ASCII letters/numbers/`-`/`_`; default 12 results, `maxResults` 1..25; automatic floor 1 h
+- `youtube`: selected-channel public RSS; `channelId` may be stored empty but refresh requires a valid UC-prefixed identifier; default 12 results, `maxResults` 1..15; automatic floor 1 h; frontend exposure is blocked on the open auth/quota product decision
 
 Do not duplicate adapter validation rules in the generic config canonicalizer. Frontend controls may provide friendly constraints, but the Rust adapter boundary remains authoritative.
+
+## YouTube decision gate
+
+`docs/DECISIONS.md` currently lists `exact YouTube authentication/quota strategy before exposing that adapter` as an open question. Preserve that gate until explicitly resolved.
+
+The implemented backend option is deliberately low-friction:
+
+- URL: public YouTube channel Atom/RSS feed
+- selection: user supplies a channel ID
+- authentication: none
+- YouTube Data API quota: none
+- result cap: 15
+- thumbnail URL: derived from stable video ID
+- automatic refresh hard floor: 1 h
+
+If the user approves this as the final strategy, update `docs/DECISIONS.md` in the same batch that exposes YouTube. If the product requirement is instead authenticated subscriptions/channel discovery, redesign before exposure rather than silently treating RSS as equivalent.
 
 ## Scheduler + runtime invariants
 
@@ -329,7 +360,7 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 1. Read `AGENTS.md`, `README.md`, this file, `docs/ACTIVE_WORK.md` when present, and `docs/DECISIONS.md`.
 2. Treat GitHub state as authoritative after an interrupted or overlapping stream. `main` is through PR #51; PR #52 on `real-source-adapters-clean` is the active product work until GitHub says otherwise.
 3. Inspect PR #52 head and all three CI workflows before changing code. Do not assume any intermediate green run is the final head.
-4. Wikipedia is the only new adapter currently exposed in the add picker. Keep Qiita/Zenn/YouTube hidden until each has its own real typed configuration UI.
-5. Validate the final Wikipedia head across Linux/Windows/macOS. If green, the next bounded frontend slice is Qiita (`query` + `maxResults`), preserving Rust-side validation and narrow widget-only rehydration.
-6. After Qiita, continue one source at a time for Zenn and YouTube; do not expose all remaining sources in one batch.
-7. Reconcile `docs/ACTIVE_WORK.md` at each checkpoint, update durable docs/decisions where semantics changed, and require Linux/Windows/macOS release-build CI green before merging PR #52.
+4. Wikipedia, Qiita, and Zenn are exposed with typed source editors. YouTube is the only backend adapter intentionally hidden from the add picker.
+5. Before any YouTube frontend work, resolve the `docs/DECISIONS.md` auth/quota open question. The implemented candidate strategy is public selected-channel RSS with no auth/Data API quota; do not silently assume it is approved.
+6. If public RSS is approved, record that decision, then expose YouTube with typed `channelId` + `maxResults` controls, manual refresh, existing refresh-policy UI, and narrow widget-only rehydration.
+7. Require Linux/Windows/macOS release-build CI green on the final merge candidate, reconcile `docs/ACTIVE_WORK.md` and PR #52, and perform available desktop smoke testing before merge.

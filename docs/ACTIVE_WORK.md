@@ -53,7 +53,7 @@ PR #52: `Ship real Wikipedia, Qiita, Zenn and YouTube source adapters`
 - related issue: #48
 - YouTube Data API follow-up: #53
 
-The branch has backend adapters for four real public sources behind the existing scheduler/cache/source-key boundary:
+The branch has backend adapters for four additional real public sources behind the existing scheduler/cache/source-key boundary:
 
 ### Wikipedia
 
@@ -80,6 +80,7 @@ The branch has backend adapters for four real public sources behind the existing
 - selected-channel public RSS
 - channel ID configuration
 - thumbnail-first cached rows
+- empty/unconfigured channel config is a dormant source rather than a refresh failure
 
 ### Runtime integration
 
@@ -89,7 +90,7 @@ The branch has backend adapters for four real public sources behind the existing
 - no placeholder source is intentionally exposed
 - NHK remains absent
 
-## Wikipedia, Qiita, and Zenn frontend slices complete
+## Frontend slices
 
 The first substantive #52 CI regression was a stale unit test, not production behavior. Commit `1dd692beaf1f55342bee6269cfe3154907a4cf18` updates `source_validation_only_accepts_live_adapters` so all five real backend adapters are accepted while `nhk` and unknown kinds remain rejected.
 
@@ -131,11 +132,26 @@ Commit `cb747115e29a93d5dcd17369c0c6edfe9f84eb92` exposes Zenn:
 - backend >= 1 h automatic refresh floor surfaced in UI
 - duplicated per-widget refresh-form construction was extracted into one helper shared by arXiv/Qiita/Wikipedia/Zenn
 
-The reconciled head `e945e84dd762a41a6d09ebac217025a228893363` passed Linux, Windows, and macOS CI before the YouTube policy decision was recorded. Newer documentation/code commits create new runs, so final merge evidence must still come from the eventual final head.
+### YouTube RSS
 
-## YouTube policy gate resolved
+The product gate was resolved in `docs/DECISIONS.md` at commit `0dbfa6794eece7b7abeea0d927a2795482fdc069`.
 
-The previous deliberate stop point is resolved by user decision and commit `0dbfa6794eece7b7abeea0d927a2795482fdc069` in `docs/DECISIONS.md`.
+Commit `2391af482cfbab8ae443f860d1c1d33ccf0abe07` makes an empty YouTube `channelId` a dormant source that returns no rows instead of recording a failed refresh/backoff. This supports the add-first/configure-immediately UX cleanly.
+
+Commit `1cec7217a714daff22d457f5323952eb82fd98f2` exposes YouTube RSS in the Board:
+
+- YouTube appears in the add picker
+- a newly added YouTube widget opens its config editor immediately
+- typed `channelId` + `maxResults` editor, with `maxResults` 1..15
+- accepts a raw `UC...` channel ID or extracts the ID from a `/channel/UC...` URL with no additional network request
+- concise help explains that RSS itself needs no API key and `@handle` resolution belongs to optional Data API work under #53
+- inherit/OFF/custom refresh controls + manual refresh
+- backend >= 1 h automatic refresh floor surfaced in UI
+- save continues through the Rust-authoritative source config command and narrow widget rehydration path
+
+The reconciled pre-YouTube head `e945e84dd762a41a6d09ebac217025a228893363` passed Linux, Windows, and macOS CI. CI for `1cec7217...` started on all three OSes; inspect the actual current PR head before merge because later documentation commits may create newer runs.
+
+## YouTube API/OAuth rollout decision
 
 Use this rollout:
 
@@ -147,24 +163,20 @@ Recommendation/ranking remains application-owned. Do not assume YouTube Data API
 
 Issue #53 tracks the optional Data API/API-key/OAuth progression.
 
-For #52, channel-ID usability must not be ignored. Add lightweight help in the YouTube widget configuration immediately. Richer `@handle`/URL lookup should land with #53 rather than adding another network dependency/poller to the RSS baseline.
-
 ## What is deliberately NOT complete in PR #52 yet
 
 Do not merge #52 yet. Remaining work is:
 
-1. expose YouTube in the add picker with a typed `channelId` + `maxResults` frontend editor
-2. include lightweight channel-ID guidance in that editor; no Data API key is required in #52
-3. preserve inherit/OFF/custom refresh controls, manual refresh, Rust-authoritative validation, and narrow source/widget rehydration
-4. Linux, Windows, and macOS release-build CI green on the final merge candidate
-5. real desktop smoke test of the new source UIs/network presentation when a desktop session is available
-6. final durable documentation/PR-body reconciliation before merge
+1. Linux, Windows, and macOS release-build CI green on the final merge candidate
+2. real desktop smoke test of the new source UIs/network presentation when a desktop session is available
+3. reconcile `docs/HANDOFF.md` and PR #52 body to the final YouTube implementation/CI result
+4. then move PR #52 out of draft and merge only when the above evidence is satisfactory
 
-Wikipedia, Qiita, and Zenn are no longer in the remaining implementation list. Data API enrichment and OAuth belong to #53, not the #52 merge gate.
+Wikipedia, Qiita, Zenn, and the RSS-only YouTube frontend slice are no longer in the implementation list. Data API enrichment and OAuth belong to #53, not the #52 merge gate.
 
 ## Next short batch
 
-1. Implement **YouTube RSS frontend only**: add-picker exposure, typed `channelId` + `maxResults` config, manual refresh, and the shared widget refresh controls.
-2. Add concise help that explains the required `UC...` channel ID and that easier `@handle` resolution is planned under #53. Do not add API polling or credential storage in this batch.
-3. Run/check Linux, Windows, and macOS CI on the resulting code head.
-4. Reconcile `docs/HANDOFF.md` and PR #52 body once the YouTube slice is green.
+1. Inspect CI for the current code head and fix any substantive failure.
+2. Reconcile `docs/HANDOFF.md` with the completed YouTube RSS frontend behavior and the #53 follow-up plan.
+3. Update PR #52 body with the final implementation and CI evidence.
+4. Perform the available desktop smoke test; if a real desktop session is unavailable in the current environment, leave that limitation explicit rather than inventing a result.

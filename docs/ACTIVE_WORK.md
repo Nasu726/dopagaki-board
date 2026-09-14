@@ -51,6 +51,7 @@ PR #52: `Ship real Wikipedia, Qiita, Zenn and YouTube source adapters`
 - head branch: `real-source-adapters-clean`
 - PR is intentionally still a draft
 - related issue: #48
+- YouTube Data API follow-up: #53
 
 The branch has backend adapters for four real public sources behind the existing scheduler/cache/source-key boundary:
 
@@ -88,7 +89,7 @@ The branch has backend adapters for four real public sources behind the existing
 - no placeholder source is intentionally exposed
 - NHK remains absent
 
-## Latest short checkpoint: Wikipedia, Qiita, and Zenn frontend slices complete
+## Wikipedia, Qiita, and Zenn frontend slices complete
 
 The first substantive #52 CI regression was a stale unit test, not production behavior. Commit `1dd692beaf1f55342bee6269cfe3154907a4cf18` updates `source_validation_only_accepts_live_adapters` so all five real backend adapters are accepted while `nhk` and unknown kinds remain rejected.
 
@@ -130,39 +131,40 @@ Commit `cb747115e29a93d5dcd17369c0c6edfe9f84eb92` exposes Zenn:
 - backend >= 1 h automatic refresh floor surfaced in UI
 - duplicated per-widget refresh-form construction was extracted into one helper shared by arXiv/Qiita/Wikipedia/Zenn
 
-On `cb747115...`, macOS already passed the frontend production build before this documentation checkpoint and was running Rust tests. Linux/Windows/macOS workflows were all active. Later documentation commits create newer heads, so inspect the current PR head rather than treating that intermediate run as final merge evidence.
+The reconciled head `e945e84dd762a41a6d09ebac217025a228893363` passed Linux, Windows, and macOS CI before the YouTube policy decision was recorded. Newer documentation/code commits create new runs, so final merge evidence must still come from the eventual final head.
 
-## Deliberate YouTube stop point
+## YouTube policy gate resolved
 
-Do **not** expose YouTube in the add picker yet.
+The previous deliberate stop point is resolved by user decision and commit `0dbfa6794eece7b7abeea0d927a2795482fdc069` in `docs/DECISIONS.md`.
 
-The backend currently implements selected-channel public RSS (`https://www.youtube.com/feeds/videos.xml?channel_id=...`) with:
+Use this rollout:
 
-- `channelId` configuration
-- `maxResults` 1..15
-- thumbnail-first rows via `i.ytimg.com`
-- automatic refresh floor 1 h
-- no YouTube Data API key and therefore no Data API quota consumption
+1. **RSS baseline now:** selected-channel public RSS, `channelId`, thumbnail-first rows, `maxResults` 1..15, >= 1 h automatic-refresh floor. No API key is required for this path.
+2. **Data API incrementally after the practical RSS slice:** users supply their own API key; never embed a shared key. Use API calls selectively for high-value work such as `@handle` -> channel resolution, channel validation, visible/cached metadata enrichment, and bounded recommendation candidate discovery. RSS remains the fallback.
+3. **OAuth later:** after the practical non-OAuth version is complete, add a guided few-click OAuth setup and authenticated features such as subscription-aware discovery.
 
-However, `docs/DECISIONS.md` still lists `exact YouTube authentication/quota strategy before exposing that adapter` as an open question, and Issue #48 requires an explicit quota/auth design before YouTube exposure. Treat this as a genuine product-decision gate, not as permission to silently expose the existing RSS implementation.
+Recommendation/ranking remains application-owned. Do not assume YouTube Data API exposes the user's current Home recommendation feed; candidate collection and the existing transparent heuristic layer are separate concerns.
 
-The decision to settle with the user is whether the public-RSS design itself is the final authentication/quota strategy (no auth, no Data API quota, explicit channel ID supplied by the user) or whether a different authenticated/subscription-based design is required.
+Issue #53 tracks the optional Data API/API-key/OAuth progression.
+
+For #52, channel-ID usability must not be ignored. Add lightweight help in the YouTube widget configuration immediately. Richer `@handle`/URL lookup should land with #53 rather than adding another network dependency/poller to the RSS baseline.
 
 ## What is deliberately NOT complete in PR #52 yet
 
 Do not merge #52 yet. Remaining work is:
 
-1. settle the YouTube authentication/quota strategy and update `docs/DECISIONS.md`
-2. only if public RSS or another concrete strategy is approved, expose YouTube with a typed frontend config/manual-refresh slice
-3. Linux, Windows, and macOS release-build CI green on the final merge candidate
-4. real desktop smoke test of the new source UIs/network presentation when a desktop session is available
-5. final durable documentation/PR-body reconciliation before merge
+1. expose YouTube in the add picker with a typed `channelId` + `maxResults` frontend editor
+2. include lightweight channel-ID guidance in that editor; no Data API key is required in #52
+3. preserve inherit/OFF/custom refresh controls, manual refresh, Rust-authoritative validation, and narrow source/widget rehydration
+4. Linux, Windows, and macOS release-build CI green on the final merge candidate
+5. real desktop smoke test of the new source UIs/network presentation when a desktop session is available
+6. final durable documentation/PR-body reconciliation before merge
 
-Wikipedia, Qiita, and Zenn are no longer in the remaining implementation list.
+Wikipedia, Qiita, and Zenn are no longer in the remaining implementation list. Data API enrichment and OAuth belong to #53, not the #52 merge gate.
 
 ## Next short batch
 
-1. Inspect CI attached to the current PR #52 head. Fix any substantive regression before expanding scope.
-2. Ask/resolve the YouTube policy gate: whether selected-channel public RSS with no auth/API quota is the intended final strategy.
-3. If approved, record the decision in `docs/DECISIONS.md`, then implement **YouTube only** with `channelId` + `maxResults` and the existing refresh/manual/narrow-rehydration boundaries.
-4. Re-run Linux/Windows/macOS CI, perform available desktop smoke testing, reconcile docs/PR body, and only then consider PR #52 ready for review/merge.
+1. Implement **YouTube RSS frontend only**: add-picker exposure, typed `channelId` + `maxResults` config, manual refresh, and the shared widget refresh controls.
+2. Add concise help that explains the required `UC...` channel ID and that easier `@handle` resolution is planned under #53. Do not add API polling or credential storage in this batch.
+3. Run/check Linux, Windows, and macOS CI on the resulting code head.
+4. Reconcile `docs/HANDOFF.md` and PR #52 body once the YouTube slice is green.

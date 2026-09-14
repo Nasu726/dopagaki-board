@@ -1,25 +1,20 @@
-# Refresh-path query reduction
+# Historical implementation note: refresh-path query reduction
 
-Post-MVP lightweightness pass for Issue #43 / parent Issue #6.
+This records the structural optimization merged via PR #44 / Issue #43. It is **not** a pending refactor plan; current runtime behavior is documented in `ARCHITECTURE.md` and `REFRESH_POLICY.md`.
 
-## Before
+## Motivation
 
-Two background refresh paths decoded more widget data than they needed:
+Two background refresh paths originally decoded more widget data than required:
 
-- scheduler source synchronization called `widgets::list`, decoding every widget's geometry, refresh config, display mode, and source data before reducing rows back to source identities
-- successful refresh completion called `widgets::list` again, then rebuilt and normalized a source key for every widget just to determine which widget ids should receive `cache-changed`
+- scheduler source synchronization decoded complete `WidgetLayout` rows before reducing them to source identities
+- successful refresh completion listed broad widget data and rebuilt/normalized source keys just to identify widget ids for `cache-changed`
 
-This was functionally correct but made background work scale with the full `WidgetLayout` representation.
+## Result
 
-## After
+The DB/runtime path was narrowed so refresh scheduling and completion read only the source/config/widget-id data actually needed. Later refresh-policy work evolved the exact query functions, but the invariant remains: background refresh paths should not decode geometry/display state merely to schedule source work or fan out a cache event.
 
-`db::widgets` exposes two narrow read paths:
+Canonical source normalization remains authoritative. Semantically equivalent source configs must still resolve to the same source identity.
 
-- `list_distinct_source_configs`: only distinct `(source_kind, source_config_json)` pairs for scheduler synchronization
-- `list_ids_and_configs_for_source_kind`: only `(id, source_config_json)` rows for the source kind that just refreshed
+No scheduler timing, concurrency, cache identity, UI event semantics, or network policy change was intended. The change was structural: less irrelevant SQLite row decoding/allocation/normalization.
 
-Runtime source normalization remains authoritative. In particular, refresh completion still normalizes the stored source configuration before comparing identities, so semantically equivalent legacy/non-sparse arXiv configs continue to match the same canonical source key.
-
-No scheduler timing, concurrency, cache identity, UI event payload, or network behavior changes are intended. The improvement is structural: less SQLite row decoding, fewer allocations, and fewer irrelevant source-key normalizations on refresh-related background work.
-
-Real resident CPU/RSS impact still requires desktop measurement; do not infer a numeric improvement from this refactor alone.
+Real CPU/RSS impact requires measurement; do not infer a numeric gain solely from this refactor.

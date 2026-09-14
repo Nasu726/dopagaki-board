@@ -1,10 +1,32 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import {
+  DEFAULT_WIDGET_COLUMNS,
+  DEFAULT_WIDGET_ROWS,
+  GRID_COLUMNS,
+  GRID_ROWS,
+  type GridRect,
+  type ResizeDirection,
+  clampGridRect,
+  collides,
+  findNearestFreeRect,
+  isValidGridRect,
+  legacyPixelsToGrid,
+  pointToGridCell,
+  pointerDeltaToGrid,
+  rectToStyle,
+  resizeGridRect,
+} from "./board-grid";
 import "./styles.css";
 import "./cache-ui.css";
 
 type ViewState = "hidden" | "idle" | "compact" | "board";
-type ViewEvent = "globalToggle" | "clickIdleOrb" | "openBoard" | "hide";
+type ViewEvent =
+  | "globalToggle"
+  | "clickIdleOrb"
+  | "openCompact"
+  | "openBoard"
+  | "hide";
 
 type ShellStatus = {
   hasUnseen: boolean;
@@ -48,7 +70,7 @@ type CacheChanged = {
   widgetIds: number[];
 };
 
-type Point = { x: number; y: number };
+type GridPoint = { x: number; y: number };
 
 type SourceGroup = {
   sourceKind: string;
@@ -65,18 +87,14 @@ const SOURCE_LABELS: Record<string, string> = {
   youtube: "YouTube",
   arxiv: "arXiv",
   wikipedia: "Wikipedia",
-  nhk: "NHK",
   qiita: "Qiita",
   zenn: "Zenn",
 };
 
-const DEFAULT_WIDGET_WIDTH = 280;
-const DEFAULT_WIDGET_HEIGHT = 180;
-const MIN_WIDGET_WIDTH = 140;
-const MIN_WIDGET_HEIGHT = 96;
+const ADDABLE_SOURCE_KINDS = ["arxiv"] as const;
 const DEFAULT_GLOBAL_SHORTCUT = "CmdOrCtrl+Shift+Space";
 const COMPACT_CACHE_LIMIT = 3;
-const BOARD_CACHE_LIMIT = 3;
+const BOARD_CACHE_LIMIT = 25;
 const REFRESH_SLIDER_MAX = 100;
 const MIN_AUTO_REFRESH_SECONDS = 5 * 60;
 const MAX_AUTO_REFRESH_SECONDS = 24 * 60 * 60;
@@ -101,10 +119,9 @@ let shellStatus: ShellStatus = {
 let boardWidgets: WidgetLayout[] = [];
 let boardLoaded = false;
 let boardHydrationGeneration = 0;
-let addPoint: Point | null = null;
-let shortcutPopoverOpen = false;
+let addPoint: GridPoint | null = null;
+let settingsOpen = false;
 let shortcutFormError: string | null = null;
-let refreshPopoverOpen = false;
 let refreshSettings: RefreshSettings | null = null;
 let refreshFormError: string | null = null;
 
@@ -130,7 +147,7 @@ function render(): void {
 function renderIdle(): void {
   root.innerHTML = `
     <main class="idle-shell">
-      <button id="idle-orb" class="idle-orb" type="button" aria-label="Open dopagaki-board">
+      <button id="idle-orb" class="idle-orb" type="button" aria-label="Restore dopagaki-board" title="Restore">
         <span class="idle-orb__surface" aria-hidden="true"></span>
         <span class="idle-orb__badge" aria-hidden="true"${shellStatus.hasUnseen ? "" : " hidden"}></span>
       </button>
@@ -144,32 +161,32 @@ function renderIdle(): void {
 
 function renderCompact(): void {
   const shortcutWarning = shellStatus.globalShortcutError
-    ? `<button class="shortcut-warning" data-action="shortcut-settings" type="button">Shortcut unavailable</button>`
+    ? `<button class="shortcut-warning" data-action="settings" type="button">Shortcut unavailable</button>`
     : "";
 
   root.innerHTML = `
     <main class="compact-shell" aria-label="Quick discovery">
       <header class="compact-toolbar">
-        <span class="compact-mark" aria-hidden="true"></span>
-        <span class="compact-title">dopagaki</span>
+        <div class="window-drag-region" data-tauri-drag-region title="Drag window">
+          <span class="compact-mark" aria-hidden="true" data-tauri-drag-region></span>
+          <span class="compact-title" data-tauri-drag-region>dopagaki</span>
+        </div>
         ${shortcutWarning}
-        <button class="icon-button" data-action="board" type="button" aria-label="Open Board">▦</button>
-        <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle">×</button>
+        <button class="icon-button" data-action="board" type="button" aria-label="Open Board" title="Maximize to Board">□</button>
+        <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle" title="Minimize to Idle">—</button>
       </header>
       <section class="compact-feed" data-count="0" aria-label="Cached discovery items"></section>
     </main>
   `;
 
   document.querySelector('[data-action="board"]')?.addEventListener("click", () => {
-    shortcutPopoverOpen = false;
-    refreshPopoverOpen = false;
+    settingsOpen = false;
     void transitionView("openBoard");
   });
 
-  document.querySelector('[data-action="shortcut-settings"]')?.addEventListener("click", () => {
-    shortcutPopoverOpen = true;
+  document.querySelector('[data-action="settings"]')?.addEventListener("click", () => {
+    settingsOpen = true;
     shortcutFormError = shellStatus.globalShortcutError;
-    refreshPopoverOpen = false;
     void transitionView("openBoard");
   });
 
@@ -192,7 +209,9 @@ async function loadCompactItems(showLoading = true): Promise<void> {
   }
 
   try {
-    const items = await invoke<CachedItem[]>("list_cached_items", { limit: COMPACT_CACHE_LIMIT });
+    const items = await invoke<CachedItem[]>("list_compact_items", {
+      limit: COMPACT_CACHE_LIMIT,
+    });
     if (currentView !== "compact" || !feed.isConnected) {
       return;
     }
@@ -282,47 +301,41 @@ function renderBoard(): void {
   const generation = ++boardHydrationGeneration;
   const widgetMarkup = boardWidgets.map(renderWidgetMarkup).join("");
   const pickerMarkup = addPoint ? renderAddPickerMarkup(addPoint) : "";
-  const shortcutPopoverMarkup = shortcutPopoverOpen ? renderShortcutPopoverMarkup() : "";
-  const refreshPopoverMarkup = refreshPopoverOpen ? renderRefreshPopoverMarkup() : "";
+  const settingsMarkup = settingsOpen ? renderSettingsMarkup() : "";
 
   root.innerHTML = `
     <main class="board-shell">
       <header class="board-toolbar">
-        <strong>Board</strong>
-        <span class="board-toolbar__hint">Click empty space to add · drag to move</span>
-        <button class="icon-button" data-action="refresh-settings" type="button" aria-label="Refresh settings">↻</button>
-        <button class="icon-button" data-action="shortcut-settings" type="button" aria-label="Global shortcut settings">⌨</button>
-        <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle">×</button>
+        <div class="window-drag-region" data-tauri-drag-region title="Drag window">
+          <strong data-tauri-drag-region>Board</strong>
+          <span class="board-toolbar__hint" data-tauri-drag-region>Click empty space to add · drag widgets to move</span>
+        </div>
+        <button class="icon-button" data-action="settings" type="button" aria-label="Settings" title="Settings">⚙</button>
+        <button class="icon-button" data-action="restore" type="button" aria-label="Restore Compact" title="Restore down to Compact">▱</button>
+        <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle" title="Minimize to Idle">—</button>
       </header>
       <section class="board-canvas${boardWidgets.length === 0 ? " board-canvas--empty" : ""}" aria-label="Discovery Board">
         ${widgetMarkup}
         ${pickerMarkup}
       </section>
-      ${shortcutPopoverMarkup}
-      ${refreshPopoverMarkup}
+      ${settingsMarkup}
     </main>
   `;
 
   document.querySelector('[data-action="collapse"]')?.addEventListener("click", () => {
-    shortcutPopoverOpen = false;
-    refreshPopoverOpen = false;
+    settingsOpen = false;
     void transitionView("globalToggle");
   });
 
-  document.querySelector('[data-action="shortcut-settings"]')?.addEventListener("click", () => {
-    shortcutPopoverOpen = !shortcutPopoverOpen;
-    shortcutFormError = null;
-    refreshPopoverOpen = false;
-    refreshFormError = null;
-    addPoint = null;
-    renderBoard();
+  document.querySelector('[data-action="restore"]')?.addEventListener("click", () => {
+    settingsOpen = false;
+    void transitionView("openCompact");
   });
 
-  document.querySelector('[data-action="refresh-settings"]')?.addEventListener("click", () => {
-    refreshPopoverOpen = !refreshPopoverOpen;
-    refreshFormError = null;
-    shortcutPopoverOpen = false;
+  document.querySelector('[data-action="settings"]')?.addEventListener("click", () => {
+    settingsOpen = !settingsOpen;
     shortcutFormError = null;
+    refreshFormError = null;
     addPoint = null;
     renderBoard();
   });
@@ -346,8 +359,7 @@ function renderBoard(): void {
     renderBoard();
   });
 
-  bindShortcutPopover();
-  bindRefreshPopover();
+  bindSettings();
   bindWidgetInteractions();
   void hydrateBoardWidgets(generation);
 
@@ -361,28 +373,36 @@ function renderWidgetMarkup(widget: WidgetLayout): string {
   const label = sourceLabel(widget.sourceKind);
   const configButton =
     widget.sourceKind === "arxiv"
-      ? `<button class="board-widget__config" data-config-widget type="button" aria-label="Configure ${label}" title="Source settings">•••</button>`
+      ? `<button class="board-widget__config" data-config-widget type="button" aria-label="Configure ${label}" title="Widget settings">•••</button>`
       : "";
   const refreshButton =
     widget.sourceKind === "arxiv"
       ? `<button class="board-widget__refresh" data-refresh-widget type="button" aria-label="Refresh ${label}" title="Refresh now">↻</button>`
       : "";
+  const handles: ResizeDirection[] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+  const resizeMarkup = handles
+    .map(
+      (direction) =>
+        `<button class="board-widget__resize board-widget__resize--${direction}" data-resize-handle="${direction}" type="button" aria-label="Resize ${label} from ${direction}"></button>`,
+    )
+    .join("");
+
   return `
     <article
       class="board-widget board-widget--${widget.sourceKind}"
       data-widget-id="${widget.id}"
-      style="left:${widget.x}px;top:${widget.y}px;width:${widget.width}px;height:${widget.height}px"
+      style="${rectToStyle(widgetRect(widget))}"
     >
       <div class="board-widget__drag" data-drag-handle>
         <span>${label}</span>
         ${configButton}
         ${refreshButton}
-        <button class="board-widget__delete" data-delete-widget type="button" aria-label="Delete ${label}">×</button>
+        <button class="board-widget__delete" data-delete-widget type="button" aria-label="Delete ${label}" title="Delete widget">×</button>
       </div>
       <div class="board-widget__content" data-widget-content aria-label="${label} cached content">
         <span class="board-widget__empty">Loading cache…</span>
       </div>
-      <button class="board-widget__resize" data-resize-handle type="button" aria-label="Resize ${label}"></button>
+      ${resizeMarkup}
     </article>
   `;
 }
@@ -503,126 +523,99 @@ function createBoardEmpty(message: string): HTMLSpanElement {
   return element;
 }
 
-function renderAddPickerMarkup(point: Point): string {
+function renderAddPickerMarkup(point: GridPoint): string {
+  const left = (point.x / GRID_COLUMNS) * 100;
+  const top = (point.y / GRID_ROWS) * 100;
   return `
-    <aside class="add-picker" style="left:${point.x}px;top:${point.y}px" aria-label="Add widget">
+    <aside class="add-picker" style="left:${left}%;top:${top}%" aria-label="Add widget">
       <div class="add-picker__header">
         <strong>Add</strong>
         <button data-action="cancel-add" type="button" aria-label="Cancel">×</button>
       </div>
       <div class="add-picker__sources">
-        ${Object.entries(SOURCE_LABELS)
-          .map(
-            ([kind, label]) =>
-              `<button data-add-source="${kind}" type="button">${label}</button>`,
-          )
-          .join("")}
+        ${ADDABLE_SOURCE_KINDS.map(
+          (kind) => `<button data-add-source="${kind}" type="button">${sourceLabel(kind)}</button>`,
+        ).join("")}
       </div>
+      <p class="add-picker__note">Only working source adapters are shown.</p>
     </aside>
   `;
 }
 
-function renderShortcutPopoverMarkup(): string {
+function renderSettingsMarkup(): string {
   return `
-    <aside class="shortcut-popover" aria-label="Global shortcut settings">
-      <form id="shortcut-form">
+    <aside class="settings-popover" aria-label="Settings">
+      <div class="settings-popover__header">
+        <strong>Settings</strong>
+        <button data-action="close-settings" type="button" aria-label="Close settings">×</button>
+      </div>
+      <form id="shortcut-form" class="settings-section">
         <label for="shortcut-input">Global shortcut</label>
         <input id="shortcut-input" type="text" autocomplete="off" spellcheck="false" aria-describedby="shortcut-help shortcut-error">
         <p id="shortcut-help">Example: CmdOrCtrl+Shift+Space</p>
-        <p id="shortcut-error" class="shortcut-popover__error" hidden></p>
-        <div class="shortcut-popover__actions">
-          <button data-action="cancel-shortcut" type="button">Cancel</button>
-          <button type="submit">Save</button>
+        <p id="shortcut-error" class="settings-error" hidden></p>
+        <div class="settings-actions">
+          <button type="submit">Save shortcut</button>
         </div>
       </form>
+      <section class="settings-section" aria-label="Automatic refresh">
+        <label for="refresh-interval">Default automatic refresh</label>
+        <div class="settings-range-row">
+          <input id="refresh-interval" type="range" min="0" max="${REFRESH_SLIDER_MAX}" step="1">
+          <output id="refresh-interval-output" for="refresh-interval">Loading…</output>
+        </div>
+        <p>Left edge is OFF. Source-specific safety limits still apply.</p>
+        <p id="refresh-error" class="settings-error" hidden></p>
+      </section>
     </aside>
   `;
 }
 
-function renderRefreshPopoverMarkup(): string {
-  return `
-    <aside class="refresh-popover" aria-label="Automatic refresh settings">
-      <div class="refresh-popover__header">
-        <strong>Auto refresh</strong>
-        <button data-action="close-refresh-settings" type="button" aria-label="Close refresh settings">×</button>
-      </div>
-      <label class="refresh-popover__control" for="refresh-interval">
-        <input id="refresh-interval" type="range" min="0" max="${REFRESH_SLIDER_MAX}" step="1">
-        <output id="refresh-interval-output" for="refresh-interval">Loading…</output>
-      </label>
-      <p class="refresh-popover__help">Left edge is OFF. The rest scales from 5 min to 24 h, with more room for short intervals.</p>
-      <p id="refresh-error" class="refresh-popover__error" hidden></p>
-    </aside>
-  `;
-}
-
-function bindShortcutPopover(): void {
-  if (!shortcutPopoverOpen) {
+function bindSettings(): void {
+  if (!settingsOpen) {
     return;
   }
 
-  const input = document.querySelector<HTMLInputElement>("#shortcut-input");
-  const form = document.querySelector<HTMLFormElement>("#shortcut-form");
-  const errorElement = document.querySelector<HTMLElement>("#shortcut-error");
-  if (!input || !form || !errorElement) {
-    return;
-  }
-
-  input.value = shellStatus.globalShortcut;
-  const message = shortcutFormError ?? shellStatus.globalShortcutError;
-  if (message) {
-    errorElement.textContent = message;
-    errorElement.hidden = false;
-  }
-
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void saveGlobalShortcut(input.value);
-  });
-
-  document.querySelector('[data-action="cancel-shortcut"]')?.addEventListener("click", () => {
-    shortcutPopoverOpen = false;
+  document.querySelector('[data-action="close-settings"]')?.addEventListener("click", () => {
+    settingsOpen = false;
     shortcutFormError = null;
-    renderBoard();
-  });
-
-  input.focus();
-  input.select();
-}
-
-function bindRefreshPopover(): void {
-  if (!refreshPopoverOpen) {
-    return;
-  }
-
-  const slider = document.querySelector<HTMLInputElement>("#refresh-interval");
-  const output = document.querySelector<HTMLOutputElement>("#refresh-interval-output");
-  const errorElement = document.querySelector<HTMLElement>("#refresh-error");
-  if (!slider || !output || !errorElement) {
-    return;
-  }
-
-  document.querySelector('[data-action="close-refresh-settings"]')?.addEventListener("click", () => {
-    refreshPopoverOpen = false;
     refreshFormError = null;
     renderBoard();
   });
 
+  const shortcutInput = document.querySelector<HTMLInputElement>("#shortcut-input");
+  const shortcutForm = document.querySelector<HTMLFormElement>("#shortcut-form");
+  const shortcutError = document.querySelector<HTMLElement>("#shortcut-error");
+  if (shortcutInput && shortcutForm && shortcutError) {
+    shortcutInput.value = shellStatus.globalShortcut;
+    showSettingsError(shortcutError, shortcutFormError ?? shellStatus.globalShortcutError);
+    shortcutForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void saveGlobalShortcut(shortcutInput.value);
+    });
+  }
+
+  const slider = document.querySelector<HTMLInputElement>("#refresh-interval");
+  const output = document.querySelector<HTMLOutputElement>("#refresh-interval-output");
+  const refreshError = document.querySelector<HTMLElement>("#refresh-error");
+  if (!slider || !output || !refreshError) {
+    return;
+  }
+
   slider.addEventListener("input", () => {
     output.value = formatRefreshInterval(sliderPositionToSeconds(Number(slider.value)));
   });
-
   slider.addEventListener("change", () => {
-    void saveAutoRefreshInterval(Number(slider.value), slider, output, errorElement);
+    void saveAutoRefreshInterval(Number(slider.value), slider, output, refreshError);
   });
 
   if (refreshSettings) {
     setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
-    showRefreshError(errorElement, refreshFormError);
+    showSettingsError(refreshError, refreshFormError);
   } else {
     slider.disabled = true;
     output.value = "Loading…";
-    void loadRefreshSettings(slider, output, errorElement);
+    void loadRefreshSettings(slider, output, refreshError);
   }
 }
 
@@ -633,17 +626,17 @@ async function loadRefreshSettings(
 ): Promise<void> {
   try {
     refreshSettings = await invoke<RefreshSettings>("get_refresh_settings");
-    if (!refreshPopoverOpen || !slider.isConnected) {
+    if (!settingsOpen || !slider.isConnected) {
       return;
     }
     setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
     slider.disabled = false;
-    showRefreshError(errorElement, refreshFormError);
+    showSettingsError(errorElement, refreshFormError);
   } catch (error) {
-    if (refreshPopoverOpen && slider.isConnected) {
+    if (settingsOpen && slider.isConnected) {
       slider.disabled = true;
       output.value = "Unavailable";
-      showRefreshError(errorElement, getErrorMessage(error));
+      showSettingsError(errorElement, getErrorMessage(error));
     }
     console.error("failed to load refresh settings", error);
   }
@@ -658,27 +651,26 @@ async function saveAutoRefreshInterval(
   const autoIntervalSeconds = sliderPositionToSeconds(sliderPosition);
   slider.disabled = true;
   refreshFormError = null;
-  showRefreshError(errorElement, null);
+  showSettingsError(errorElement, null);
 
   try {
     refreshSettings = await invoke<RefreshSettings>("set_auto_refresh_interval", {
       autoIntervalSeconds,
     });
-    if (!refreshPopoverOpen || !slider.isConnected) {
-      return;
+    if (settingsOpen && slider.isConnected) {
+      setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
     }
-    setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
   } catch (error) {
     refreshFormError = getErrorMessage(error);
-    if (refreshPopoverOpen && slider.isConnected) {
-      showRefreshError(errorElement, refreshFormError);
+    if (settingsOpen && slider.isConnected) {
+      showSettingsError(errorElement, refreshFormError);
       if (refreshSettings) {
         setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
       }
     }
     console.error("failed to save refresh interval", error);
   } finally {
-    if (refreshPopoverOpen && slider.isConnected) {
+    if (settingsOpen && slider.isConnected) {
       slider.disabled = false;
     }
   }
@@ -693,7 +685,7 @@ function setRefreshControls(
   output.value = formatRefreshInterval(seconds);
 }
 
-function showRefreshError(element: HTMLElement, message: string | null): void {
+function showSettingsError(element: HTMLElement, message: string | null): void {
   element.textContent = message ?? "";
   element.hidden = !message;
 }
@@ -745,13 +737,9 @@ function handleBoardPointerDown(event: PointerEvent): void {
     return;
   }
 
-  const rect = canvas.getBoundingClientRect();
-  const x = clamp(event.clientX - rect.left, 0, Math.max(0, rect.width - DEFAULT_WIDGET_WIDTH));
-  const y = clamp(event.clientY - rect.top, 0, Math.max(0, rect.height - DEFAULT_WIDGET_HEIGHT));
-  addPoint = { x: Math.round(x), y: Math.round(y) };
-  shortcutPopoverOpen = false;
+  addPoint = pointToGridCell(event.clientX, event.clientY, canvas.getBoundingClientRect());
+  settingsOpen = false;
   shortcutFormError = null;
-  refreshPopoverOpen = false;
   refreshFormError = null;
   renderBoard();
 }
@@ -770,9 +758,14 @@ function bindWidgetInteractions(): void {
       startDrag(event, element, id);
     });
 
-    element.querySelector<HTMLElement>("[data-resize-handle]")?.addEventListener("pointerdown", (event) => {
-      startResize(event, element, id);
-    });
+    for (const handle of element.querySelectorAll<HTMLElement>("[data-resize-handle]")) {
+      handle.addEventListener("pointerdown", (event) => {
+        const direction = handle.dataset.resizeHandle as ResizeDirection | undefined;
+        if (direction) {
+          startResize(event, element, id, direction);
+        }
+      });
+    }
 
     element.querySelector<HTMLElement>("[data-delete-widget]")?.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -971,15 +964,40 @@ async function saveWidgetSourceConfig(
 }
 
 async function refreshBoardWidget(id: number, button: HTMLButtonElement): Promise<void> {
+  const original = button.textContent;
   button.disabled = true;
+  button.textContent = "…";
+  button.title = "Queueing refresh";
   try {
     await invoke("refresh_widget", { id });
+    if (button.isConnected) {
+      button.textContent = "✓";
+      button.title = "Refresh queued";
+      window.setTimeout(() => {
+        if (button.isConnected) {
+          button.textContent = original;
+          button.title = "Refresh now";
+          button.disabled = false;
+        }
+      }, 1200);
+      return;
+    }
   } catch (error) {
     console.error("failed to request widget refresh", error);
-  } finally {
     if (button.isConnected) {
-      button.disabled = false;
+      button.textContent = "!";
+      button.title = getErrorMessage(error);
     }
+  }
+
+  if (button.isConnected) {
+    window.setTimeout(() => {
+      if (button.isConnected) {
+        button.textContent = original;
+        button.title = "Refresh now";
+        button.disabled = false;
+      }
+    }, 1800);
   }
 }
 
@@ -987,30 +1005,44 @@ function startDrag(event: PointerEvent, element: HTMLElement, id: number): void 
   event.preventDefault();
   event.stopPropagation();
 
+  const widget = boardWidgets.find((item) => item.id === id);
+  const canvas = element.parentElement as HTMLElement;
+  if (!widget || !canvas) {
+    return;
+  }
+
   const handle = event.currentTarget as HTMLElement;
   handle.setPointerCapture(event.pointerId);
-
-  const canvas = element.parentElement as HTMLElement;
   const startX = event.clientX;
   const startY = event.clientY;
-  const initialX = element.offsetLeft;
-  const initialY = element.offsetTop;
+  const initial = widgetRect(widget);
+  let lastValid = initial;
+  const others = otherWidgetRects(id);
 
   const move = (next: PointerEvent): void => {
-    const maxX = Math.max(0, canvas.clientWidth - element.offsetWidth);
-    const maxY = Math.max(0, canvas.clientHeight - element.offsetHeight);
-    const x = clamp(initialX + next.clientX - startX, 0, maxX);
-    const y = clamp(initialY + next.clientY - startY, 0, maxY);
-    element.style.left = `${Math.round(x)}px`;
-    element.style.top = `${Math.round(y)}px`;
+    const delta = pointerDeltaToGrid(
+      next.clientX - startX,
+      next.clientY - startY,
+      canvas.clientWidth,
+      canvas.clientHeight,
+    );
+    const candidate = clampGridRect({
+      ...initial,
+      x: initial.x + delta.x,
+      y: initial.y + delta.y,
+    });
+    if (!collides(candidate, others)) {
+      lastValid = candidate;
+      applyGridRect(element, candidate);
+    }
   };
 
   const end = (): void => {
     handle.removeEventListener("pointermove", move);
     handle.removeEventListener("pointerup", end);
     handle.removeEventListener("pointercancel", end);
-    updateLocalGeometry(id, element);
-    void persistWidgetGeometry(id, element);
+    updateLocalGeometry(id, lastValid);
+    void persistWidgetGeometry(id, lastValid);
   };
 
   handle.addEventListener("pointermove", move);
@@ -1018,34 +1050,49 @@ function startDrag(event: PointerEvent, element: HTMLElement, id: number): void 
   handle.addEventListener("pointercancel", end);
 }
 
-function startResize(event: PointerEvent, element: HTMLElement, id: number): void {
+function startResize(
+  event: PointerEvent,
+  element: HTMLElement,
+  id: number,
+  direction: ResizeDirection,
+): void {
   event.preventDefault();
   event.stopPropagation();
 
+  const widget = boardWidgets.find((item) => item.id === id);
+  const canvas = element.parentElement as HTMLElement;
+  if (!widget || !canvas) {
+    return;
+  }
+
   const handle = event.currentTarget as HTMLElement;
   handle.setPointerCapture(event.pointerId);
-
-  const canvas = element.parentElement as HTMLElement;
   const startX = event.clientX;
   const startY = event.clientY;
-  const initialWidth = element.offsetWidth;
-  const initialHeight = element.offsetHeight;
+  const initial = widgetRect(widget);
+  let lastValid = initial;
+  const others = otherWidgetRects(id);
 
   const move = (next: PointerEvent): void => {
-    const maxWidth = Math.max(MIN_WIDGET_WIDTH, canvas.clientWidth - element.offsetLeft);
-    const maxHeight = Math.max(MIN_WIDGET_HEIGHT, canvas.clientHeight - element.offsetTop);
-    const width = clamp(initialWidth + next.clientX - startX, MIN_WIDGET_WIDTH, maxWidth);
-    const height = clamp(initialHeight + next.clientY - startY, MIN_WIDGET_HEIGHT, maxHeight);
-    element.style.width = `${Math.round(width)}px`;
-    element.style.height = `${Math.round(height)}px`;
+    const delta = pointerDeltaToGrid(
+      next.clientX - startX,
+      next.clientY - startY,
+      canvas.clientWidth,
+      canvas.clientHeight,
+    );
+    const candidate = resizeGridRect(initial, direction, delta.x, delta.y);
+    if (!collides(candidate, others)) {
+      lastValid = candidate;
+      applyGridRect(element, candidate);
+    }
   };
 
   const end = (): void => {
     handle.removeEventListener("pointermove", move);
     handle.removeEventListener("pointerup", end);
     handle.removeEventListener("pointercancel", end);
-    updateLocalGeometry(id, element);
-    void persistWidgetGeometry(id, element);
+    updateLocalGeometry(id, lastValid);
+    void persistWidgetGeometry(id, lastValid);
   };
 
   handle.addEventListener("pointermove", move);
@@ -1053,20 +1100,55 @@ function startResize(event: PointerEvent, element: HTMLElement, id: number): voi
   handle.addEventListener("pointercancel", end);
 }
 
-function updateLocalGeometry(id: number, element: HTMLElement): void {
+function widgetRect(widget: WidgetLayout): GridRect {
+  return {
+    x: widget.x,
+    y: widget.y,
+    width: widget.width,
+    height: widget.height,
+  };
+}
+
+function otherWidgetRects(id: number): GridRect[] {
+  return boardWidgets.filter((widget) => widget.id !== id).map(widgetRect);
+}
+
+function applyGridRect(element: HTMLElement, rect: GridRect): void {
+  const style = rectToStyle(rect);
+  element.setAttribute("style", style);
+}
+
+function updateLocalGeometry(id: number, rect: GridRect): void {
   const widget = boardWidgets.find((item) => item.id === id);
   if (!widget) {
     return;
   }
-  widget.x = element.offsetLeft;
-  widget.y = element.offsetTop;
-  widget.width = element.offsetWidth;
-  widget.height = element.offsetHeight;
+  widget.x = rect.x;
+  widget.y = rect.y;
+  widget.width = rect.width;
+  widget.height = rect.height;
 }
 
 async function loadBoardWidgets(): Promise<void> {
   try {
-    boardWidgets = await invoke<WidgetLayout[]>("list_widgets");
+    const loaded = await invoke<WidgetLayout[]>("list_widgets");
+    const { widgets, migrated } = normalizeLoadedWidgets(loaded);
+    boardWidgets = widgets;
+
+    for (const widget of migrated) {
+      try {
+        await invoke("update_widget_geometry", {
+          id: widget.id,
+          x: widget.x,
+          y: widget.y,
+          width: widget.width,
+          height: widget.height,
+        });
+      } catch (error) {
+        console.error(`failed to persist grid migration for widget ${widget.id}`, error);
+      }
+    }
+
     if (currentView === "board") {
       renderBoard();
     }
@@ -1076,24 +1158,56 @@ async function loadBoardWidgets(): Promise<void> {
   }
 }
 
-async function addBoardWidget(sourceKind: string, point: Point): Promise<void> {
-  const canvas = document.querySelector<HTMLElement>(".board-canvas");
-  const availableWidth = canvas ? Math.max(0, canvas.clientWidth - point.x) : DEFAULT_WIDGET_WIDTH;
-  const availableHeight = canvas ? Math.max(0, canvas.clientHeight - point.y) : DEFAULT_WIDGET_HEIGHT;
-  const width = clamp(Math.min(DEFAULT_WIDGET_WIDTH, availableWidth), MIN_WIDGET_WIDTH, DEFAULT_WIDGET_WIDTH);
-  const height = clamp(
-    Math.min(DEFAULT_WIDGET_HEIGHT, availableHeight),
-    MIN_WIDGET_HEIGHT,
-    DEFAULT_WIDGET_HEIGHT,
-  );
+function normalizeLoadedWidgets(loaded: WidgetLayout[]): {
+  widgets: WidgetLayout[];
+  migrated: WidgetLayout[];
+} {
+  const occupied: GridRect[] = [];
+  const migrated: WidgetLayout[] = [];
+  const widgets = [...loaded].sort((left, right) => left.id - right.id);
+
+  for (const widget of widgets) {
+    const original = widgetRect(widget);
+    const desired = isValidGridRect(original) ? original : legacyPixelsToGrid(original);
+    const placed = findNearestFreeRect(desired, occupied) ?? desired;
+    const changed =
+      placed.x !== original.x ||
+      placed.y !== original.y ||
+      placed.width !== original.width ||
+      placed.height !== original.height;
+    widget.x = placed.x;
+    widget.y = placed.y;
+    widget.width = placed.width;
+    widget.height = placed.height;
+    occupied.push(placed);
+    if (changed) {
+      migrated.push({ ...widget });
+    }
+  }
+
+  return { widgets, migrated };
+}
+
+async function addBoardWidget(sourceKind: string, point: GridPoint): Promise<void> {
+  const desired = clampGridRect({
+    x: point.x,
+    y: point.y,
+    width: DEFAULT_WIDGET_COLUMNS,
+    height: DEFAULT_WIDGET_ROWS,
+  });
+  const rect = findNearestFreeRect(desired, boardWidgets.map(widgetRect));
+  if (!rect) {
+    console.warn("Board grid is full; no free widget rectangle remains");
+    return;
+  }
 
   try {
     const widget = await invoke<WidgetLayout>("add_widget", {
       sourceKind,
-      x: point.x,
-      y: point.y,
-      width,
-      height,
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
     });
     boardWidgets.push(widget);
     addPoint = null;
@@ -1103,14 +1217,14 @@ async function addBoardWidget(sourceKind: string, point: Point): Promise<void> {
   }
 }
 
-async function persistWidgetGeometry(id: number, element: HTMLElement): Promise<void> {
+async function persistWidgetGeometry(id: number, rect: GridRect): Promise<void> {
   try {
     await invoke("update_widget_geometry", {
       id,
-      x: element.offsetLeft,
-      y: element.offsetTop,
-      width: element.offsetWidth,
-      height: element.offsetHeight,
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
     });
   } catch (error) {
     console.error("failed to save widget geometry", error);
@@ -1133,11 +1247,12 @@ async function saveGlobalShortcut(shortcut: string): Promise<void> {
   try {
     shellStatus = await invoke<ShellStatus>("set_global_shortcut", { shortcut });
     shortcutFormError = null;
-    shortcutPopoverOpen = false;
-    render();
+    if (currentView === "board" && settingsOpen) {
+      renderBoard();
+    }
   } catch (error) {
     shortcutFormError = getErrorMessage(error);
-    if (currentView === "board") {
+    if (currentView === "board" && settingsOpen) {
       renderBoard();
     }
   }
@@ -1181,16 +1296,14 @@ function applyShellStatusToVisibleUi(previous: ShellStatus): void {
     return;
   }
 
-  if (currentView === "board" && shortcutPopoverOpen) {
+  if (currentView === "board" && settingsOpen) {
     const input = document.querySelector<HTMLInputElement>("#shortcut-input");
     const errorElement = document.querySelector<HTMLElement>("#shortcut-error");
     if (input && document.activeElement !== input) {
       input.value = shellStatus.globalShortcut;
     }
     if (errorElement) {
-      const message = shortcutFormError ?? shellStatus.globalShortcutError;
-      errorElement.textContent = message ?? "";
-      errorElement.hidden = !message;
+      showSettingsError(errorElement, shortcutFormError ?? shellStatus.globalShortcutError);
     }
   }
 }

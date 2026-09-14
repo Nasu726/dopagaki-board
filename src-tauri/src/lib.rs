@@ -1,6 +1,7 @@
 mod app;
 mod commands;
 mod db;
+mod refresh_policy;
 mod refresh_settings;
 mod runtime;
 mod scheduler;
@@ -77,11 +78,14 @@ pub fn run() {
             commands::list_widgets,
             commands::add_widget,
             commands::update_widget_source_config,
+            commands::update_widget_refresh_config,
             commands::update_widget_geometry,
             commands::delete_widget,
             commands::refresh_widget,
             commands::cache_refresh::get_refresh_settings,
             commands::cache_refresh::set_auto_refresh_interval,
+            commands::cache_refresh::get_source_refresh_defaults,
+            commands::cache_refresh::set_source_refresh_default,
             commands::cache_refresh::list_cached_items,
             commands::cache_refresh::list_compact_items,
             commands::cache_refresh::list_cached_items_for_source,

@@ -3,9 +3,14 @@ pub(crate) mod arxiv;
 use crate::source_config;
 
 pub(crate) const ARXIV_AUTO_REFRESH_SECONDS: u64 = 24 * 60 * 60;
+const SUPPORTED_KINDS: &[&str] = &["arxiv"];
+
+pub(crate) fn supported_kinds() -> &'static [&'static str] {
+    SUPPORTED_KINDS
+}
 
 pub(crate) fn is_supported(source_kind: &str) -> bool {
-    source_kind == "arxiv"
+    SUPPORTED_KINDS.contains(&source_kind)
 }
 
 pub(crate) fn normalize_config(source_kind: &str, input: &str) -> Result<String, String> {
@@ -27,9 +32,9 @@ pub(crate) fn normalize_editable_config(source_kind: &str, input: &str) -> Resul
 
 pub(crate) fn effective_auto_interval(
     source_kind: &str,
-    global_interval_seconds: Option<u64>,
+    configured_interval_seconds: Option<u64>,
 ) -> Option<u64> {
-    match (source_kind, global_interval_seconds) {
+    match (source_kind, configured_interval_seconds) {
         (_, None) => None,
         ("arxiv", Some(seconds)) => Some(seconds.max(ARXIV_AUTO_REFRESH_SECONDS)),
         (_, Some(seconds)) => Some(seconds),
@@ -39,6 +44,14 @@ pub(crate) fn effective_auto_interval(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supported_kinds_only_expose_real_adapters() {
+        assert_eq!(supported_kinds(), &["arxiv"]);
+        assert!(is_supported("arxiv"));
+        assert!(!is_supported("youtube"));
+        assert!(!is_supported("nhk"));
+    }
 
     #[test]
     fn arxiv_source_identity_uses_semantic_normalization() {

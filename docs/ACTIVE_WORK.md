@@ -2,7 +2,7 @@
 
 This file is the short-horizon execution log for the currently active development stream. It exists so work can be resumed after a ChatGPT/client interruption without reconstructing state from chat history. Keep `docs/HANDOFF.md` for durable project knowledge; keep this file current while a multi-PR implementation stream is active.
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 ## Working protocol
 
@@ -32,26 +32,16 @@ Preserve these product decisions while continuing development:
 - Refresh policy is source-aware and may also be overridden per widget. Manual refresh remains available when automatic refresh is OFF.
 - A shared source instance is `(source_kind, canonical source_config_json)`; widgets sharing one source/config share cache and scheduler work.
 - Background cache updates should rehydrate only affected widget content and must not rebuild the whole Board.
-- Do not fabricate CPU/RSS/startup numbers. Real desktop performance measurements remain a separate validation step.
+- Do not fabricate CPU/RSS/startup numbers. Use `docs/PERF_BASELINE.md` for measured observations.
 - Figma is not part of the current implementation path unless visual direction becomes ambiguous again.
 
 ## Completed immediately before this active branch
 
 PR #50 (`windows-usability-pass`) was merged to `main` at merge commit `965698055ed875be88a7a77c5428d04567e4a849`.
 
-That pass established the practical Windows-oriented shell/Board behavior and the backend portion of source-aware refresh policy. Its CI had an earlier Linux rustfmt failure during development, but the merge candidate was brought green before merge.
+PR #51 (`refresh-policy-ui`) was then merged to `main` at merge commit `87a0e74ddfceab4619fad19b20e7145587c87ea7`.
 
-PR #51 (`refresh-policy-ui`) was then completed and merged to `main` at merge commit `87a0e74ddfceab4619fad19b20e7145587c87ea7`.
-
-PR #51 completed Issue #47's user-facing refresh controls:
-
-- global Settings exposes per-source refresh defaults: inherit global / OFF / custom interval
-- arXiv widget settings expose inherit source default / OFF / custom interval
-- Rust remains authoritative for persisted policy and adapter hard minimums
-- arXiv automatic refresh remains clamped to >= 24 h even if the UI selects a shorter custom interval
-- manual refresh still works while automatic refresh is OFF
-- the frontend edits policy only; source-instance scheduling semantics remain backend-owned
-- Linux, Windows, and macOS CI were all green before merge
+Together they established the confirmed 12x8 responsive Board, Windows shell/usability pass, first real Windows performance observation, source-aware backend refresh policy, per-source Settings controls, and per-widget arXiv refresh policy UI. Linux, Windows, and macOS CI were green before those merges.
 
 ## Current active PR
 
@@ -59,7 +49,6 @@ PR #52: `Ship real Wikipedia, Qiita, Zenn and YouTube source adapters`
 
 - base: `main`
 - head branch: `real-source-adapters-clean`
-- rustfmt-fix commit: `fdf90be73eeaa868ee0510ff3f657cca7fdf4fc3`
 - PR is intentionally still a draft
 - related issue: #48
 
@@ -67,71 +56,81 @@ The branch currently adds the backend adapter slice for four real public sources
 
 ### Wikipedia
 
-- uses the public Wikipedia API
+- public MediaWiki API
 - random-article discovery
 - PageImages thumbnail support where available
-- cache rows use the existing source-scoped cache representation
+- config: `language` + bounded `maxResults`
 
 ### Qiita
 
-- uses the public items API
+- public items API
 - optional query configuration
 - bounded `maxResults`
-- payload keeps source metadata such as likes count for future presentation needs
+- payload retains useful source metadata such as likes count
 
 ### Zenn
 
-- RSS-backed feeds
-- supports trend/user/topic style source selection
+- public RSS feeds
+- trend/user/topic style source selection
 - bounded result count
 
 ### YouTube
 
-- selected-channel RSS feed
+- selected-channel public RSS
 - channel ID configuration
 - thumbnail-first cached rows
 
 ### Runtime integration
 
-- one reusable public `reqwest` client is shared by these public adapters
-- runtime dispatch now routes refresh work by source kind to arXiv/Wikipedia/Qiita/Zenn/YouTube adapters
-- source-specific automatic-refresh floors are defined in the source policy layer
+- one reusable public `reqwest` client is shared by the public adapters
+- runtime dispatch routes source work to arXiv/Wikipedia/Qiita/Zenn/YouTube
+- source-specific automatic-refresh floors live in the source policy layer
 - no placeholder source is intentionally exposed
 - NHK remains absent
 
-## Latest short checkpoint: rustfmt repair
+## Latest short checkpoint: first substantive CI failure repaired
 
-The first PR #52 CI attempt reached the frontend production build, then Linux/macOS stopped at `cargo fmt --check`. The failure was formatting-only, so it was repaired without broadening product behavior.
+The formatter failure from the first #52 attempt was repaired earlier by commit `fdf90be73eeaa868ee0510ff3f657cca7fdf4fc3`.
 
-Commit `fdf90be73eeaa868ee0510ff3f657cca7fdf4fc3` applies exactly the formatter changes reported by CI:
+The next PR head (`8471f60281d368987f84ca86b7e062f3a922a437`) reached Rust tests on all platforms. Linux showed one substantive failure after 63 tests passed:
 
-- multiline Qiita/Zenn runtime match arms
-- rustfmt wrapping in Qiita/Zenn validation errors
-- rustfmt wrapping for YouTube identifier predicates
-- wrapped Zenn URL assertion
-- canonical final newlines in the affected Rust files
+`commands::tests::source_validation_only_accepts_live_adapters`
 
-A new three-platform CI cycle was confirmed started for this head:
+The test still asserted that `youtube` must be rejected even though YouTube is now a real backend adapter. This was stale test data, not a production validation defect.
 
-- Linux run `34847122896`
-- Windows run `34847122868`
-- macOS run `34847122923`
+Commit `1dd692beaf1f55342bee6269cfe3154907a4cf18` repairs the regression test:
 
-At the checkpoint those runs were queued. Do not infer compile/test success yet. The next session should inspect these exact runs rather than polling an obsolete head.
+- accepts `arxiv`, `wikipedia`, `qiita`, `zenn`, and `youtube`
+- still rejects `nhk`
+- also rejects an unknown source kind
+
+A fresh Linux/Windows/macOS CI cycle started successfully after that fix. While it was running, `docs/HANDOFF.md` was reconciled with current `main`, PR #52, and the already-recorded Windows performance observation in commit `31f97f08d82406d35a2fd5af883bdd51df28a635`.
+
+This document update creates a newer head again, so do **not** keep polling the old run IDs. Inspect the CI attached to the current PR #52 head after this commit.
 
 ## What is deliberately NOT complete in PR #52 yet
 
-Do not merge #52 merely because formatting is fixed. The PR body correctly states it is still WIP. Before merge, it still needs:
+Do not merge #52 just because the backend compiles. Before merge it still needs:
 
 1. frontend add-picker exposure for the newly real adapters
-2. real source-specific widget configuration surfaces (no fake generic JSON editor)
-3. source-aware config validation wired through the existing Rust command boundary
-4. Board presentation checked for image/no-image rows for these source kinds
-5. durable documentation in `docs/HANDOFF.md` / decisions where appropriate
-6. Linux, Windows, and macOS CI green on the final merge candidate
+2. real source-specific widget configuration surfaces; no generic JSON editor
+3. source-aware config validation through the existing Rust command boundary
+4. manual refresh controls for each exposed real adapter
+5. Board presentation check for image/no-image rows
+6. durable decisions/docs where semantics changed
+7. Linux, Windows, and macOS CI green on the final merge candidate
 
 The current frontend still has `ADDABLE_SOURCE_KINDS = ["arxiv"]`, and the contextual source editor currently handles only arXiv. That remains intentional until each new adapter's real fields are exposed cleanly.
 
 ## Next short batch
 
-Inspect the three CI runs above. If rustfmt now passes, handle only the first substantive compile/test failure if one exists, then checkpoint again. If the backend slice is green, begin frontend exposure one source at a time, starting with Wikipedia because its user-facing configuration is the smallest (`language` + result count) and it already has image/no-image presentation value. Do not implement all four configuration UIs in one uninterrupted batch.
+1. Inspect CI on the **current** PR #52 head. If another substantive failure exists, fix only that failure first.
+2. If backend CI is green through Rust tests/build, implement the Wikipedia frontend slice only:
+   - add Wikipedia to the add picker
+   - expose widget-local `language` and `maxResults`
+   - use `update_widget_source_config` so Rust's Wikipedia adapter remains authoritative for validation
+   - expose manual refresh for Wikipedia
+   - preserve narrow widget-only rehydration after save
+   - verify rows remain usable with and without thumbnails
+3. Run frontend build/type validation and the normal three-platform CI before moving to Qiita.
+4. Checkpoint this file again before starting the next source. Do not implement all four frontend configuration UIs in one uninterrupted batch.

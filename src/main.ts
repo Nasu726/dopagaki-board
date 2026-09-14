@@ -109,6 +109,11 @@ type ZennSourceConfig = {
   maxResults: number;
 };
 
+type YouTubeSourceConfig = {
+  channelId: string;
+  maxResults: number;
+};
+
 const SOURCE_LABELS: Record<string, string> = {
   youtube: "YouTube",
   arxiv: "arXiv",
@@ -117,7 +122,7 @@ const SOURCE_LABELS: Record<string, string> = {
   zenn: "Zenn",
 };
 
-const ADDABLE_SOURCE_KINDS = ["arxiv", "wikipedia", "qiita", "zenn"] as const;
+const ADDABLE_SOURCE_KINDS = ["arxiv", "wikipedia", "qiita", "zenn", "youtube"] as const;
 const DEFAULT_GLOBAL_SHORTCUT = "CmdOrCtrl+Shift+Space";
 const COMPACT_CACHE_LIMIT = 3;
 const BOARD_CACHE_LIMIT = 25;
@@ -133,6 +138,8 @@ const DEFAULT_QIITA_QUERY = "";
 const DEFAULT_QIITA_MAX_RESULTS = 12;
 const DEFAULT_ZENN_FEED_TYPE: ZennFeedType = "trend";
 const DEFAULT_ZENN_MAX_RESULTS = 12;
+const DEFAULT_YOUTUBE_CHANNEL_ID = "";
+const DEFAULT_YOUTUBE_MAX_RESULTS = 12;
 
 function getAppRoot(): HTMLElement {
   const element = document.querySelector<HTMLElement>("#app");
@@ -411,7 +418,8 @@ function renderWidgetMarkup(widget: WidgetLayout): string {
     widget.sourceKind === "arxiv" ||
     widget.sourceKind === "wikipedia" ||
     widget.sourceKind === "qiita" ||
-    widget.sourceKind === "zenn";
+    widget.sourceKind === "zenn" ||
+    widget.sourceKind === "youtube";
   const configButton = configurable
     ? `<button class="board-widget__config" data-config-widget type="button" aria-label="Configure ${label}" title="Widget settings">•••</button>`
     : "";
@@ -1012,6 +1020,10 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
     openZennWidgetConfigEditor(element, widget);
     return;
   }
+  if (widget.sourceKind === "youtube") {
+    openYouTubeWidgetConfigEditor(element, widget);
+    return;
+  }
   if (widget.sourceKind === "arxiv" || widget.sourceKind === "qiita") {
     openQuerySourceWidgetConfigEditor(element, widget);
   }
@@ -1403,6 +1415,129 @@ function openZennWidgetConfigEditor(element: HTMLElement, widget: WidgetLayout):
   feedTypeSelect.focus();
 }
 
+function openYouTubeWidgetConfigEditor(element: HTMLElement, widget: WidgetLayout): void {
+  for (const editor of document.querySelectorAll<HTMLElement>("[data-widget-config-editor]")) {
+    editor.remove();
+  }
+
+  const config = readYouTubeConfig(widget.sourceConfigJson);
+  const refreshConfig = readWidgetRefreshConfig(widget.refreshConfigJson);
+  const form = document.createElement("form");
+  form.className = "board-widget-config";
+  form.dataset.widgetConfigEditor = "";
+  form.setAttribute("aria-label", "YouTube widget settings");
+  form.addEventListener("pointerdown", (event) => event.stopPropagation());
+  form.addEventListener("click", (event) => event.stopPropagation());
+
+  const header = document.createElement("div");
+  header.className = "board-widget-config__header";
+  const title = document.createElement("strong");
+  title.textContent = "YouTube widget";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "board-widget-config__close";
+  close.setAttribute("aria-label", "Close widget settings");
+  close.textContent = "×";
+  header.append(title, close);
+
+  const channelLabel = document.createElement("label");
+  channelLabel.className = "board-widget-config__field";
+  const channelCaption = document.createElement("span");
+  channelCaption.textContent = "Channel";
+  const channelInput = document.createElement("input");
+  channelInput.type = "text";
+  channelInput.value = config.channelId;
+  channelInput.maxLength = 256;
+  channelInput.autocomplete = "off";
+  channelInput.spellcheck = false;
+  channelInput.required = true;
+  channelInput.placeholder = "UC... or youtube.com/channel/UC...";
+  channelLabel.append(channelCaption, channelInput);
+
+  const countLabel = document.createElement("label");
+  countLabel.className = "board-widget-config__field board-widget-config__field--count";
+  const countCaption = document.createElement("span");
+  countCaption.textContent = "Items";
+  const countInput = document.createElement("input");
+  countInput.type = "number";
+  countInput.min = "1";
+  countInput.max = "15";
+  countInput.step = "1";
+  countInput.value = String(config.maxResults);
+  countLabel.append(countCaption, countInput);
+
+  const help = document.createElement("p");
+  help.className = "board-widget-config__help";
+  help.textContent = "Paste a UC-prefixed channel ID or a YouTube /channel/UC... URL. Automatic @handle lookup will be added with optional Data API support; RSS itself needs no API key.";
+
+  const refreshSection = createWidgetRefreshSection(
+    refreshConfig,
+    "YouTube RSS automatic refresh is always clamped to at least 1 h. Manual refresh still works while auto is OFF.",
+  );
+
+  const errorElement = document.createElement("p");
+  errorElement.className = "board-widget-config__error";
+  errorElement.setAttribute("role", "status");
+  errorElement.hidden = true;
+
+  const actions = document.createElement("div");
+  actions.className = "board-widget-config__actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = "Save";
+  actions.append(cancel, submit);
+
+  const dismiss = (): void => form.remove();
+  close.addEventListener("click", dismiss);
+  cancel.addEventListener("click", dismiss);
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismiss();
+    }
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const channelId = normalizeYouTubeChannelInput(channelInput.value);
+    if (!channelId) {
+      errorElement.textContent = "Enter a valid UC... channel ID or a YouTube /channel/UC... URL.";
+      errorElement.hidden = false;
+      channelInput.focus();
+      return;
+    }
+    void saveWidgetSettings(
+      widget.id,
+      element,
+      form,
+      JSON.stringify({
+        channelId,
+        maxResults: Number(countInput.value),
+      }),
+      [channelInput, countInput],
+      refreshSection.select,
+      refreshSection.slider,
+      errorElement,
+      submit,
+    );
+  });
+
+  form.append(
+    header,
+    channelLabel,
+    countLabel,
+    help,
+    refreshSection.element,
+    errorElement,
+    actions,
+  );
+  element.append(form);
+  channelInput.focus();
+  channelInput.select();
+}
+
 function createWidgetRefreshSection(
   refreshConfig: WidgetRefreshConfig,
   helpText: string,
@@ -1524,6 +1659,31 @@ function readZennConfig(sourceConfigJson: string): ZennSourceConfig {
       maxResults: DEFAULT_ZENN_MAX_RESULTS,
     };
   }
+}
+
+function readYouTubeConfig(sourceConfigJson: string): YouTubeSourceConfig {
+  try {
+    const parsed = JSON.parse(sourceConfigJson) as Partial<YouTubeSourceConfig>;
+    return {
+      channelId:
+        typeof parsed.channelId === "string" ? parsed.channelId : DEFAULT_YOUTUBE_CHANNEL_ID,
+      maxResults:
+        typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
+          ? parsed.maxResults
+          : DEFAULT_YOUTUBE_MAX_RESULTS,
+    };
+  } catch {
+    return {
+      channelId: DEFAULT_YOUTUBE_CHANNEL_ID,
+      maxResults: DEFAULT_YOUTUBE_MAX_RESULTS,
+    };
+  }
+}
+
+function normalizeYouTubeChannelInput(value: string): string | null {
+  const trimmed = value.trim();
+  const match = trimmed.match(/(?:^|\/channel\/)(UC[A-Za-z0-9_-]{18,30})(?:[\/?#]|$)/);
+  return match?.[1] ?? null;
 }
 
 function readWidgetRefreshConfig(refreshConfigJson: string): WidgetRefreshConfig {
@@ -1891,6 +2051,12 @@ async function addBoardWidget(sourceKind: string, point: GridPoint): Promise<voi
     boardWidgets.push(widget);
     addPoint = null;
     renderBoard();
+    if (sourceKind === "youtube") {
+      const element = document.querySelector<HTMLElement>(`[data-widget-id="${widget.id}"]`);
+      if (element) {
+        openWidgetConfigEditor(element, widget.id);
+      }
+    }
   } catch (error) {
     console.error("failed to add widget", error);
   }

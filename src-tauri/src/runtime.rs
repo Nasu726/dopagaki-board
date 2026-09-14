@@ -17,6 +17,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 const CACHE_CHANGED_EVENT: &str = "cache-changed";
 const COORDINATOR_ERROR_RETRY_SECONDS: i64 = 60;
+const PUBLIC_USER_AGENT: &str = "dopagaki-board/0.1 (https://github.com/Nasu726/dopagaki-board)";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,7 +29,15 @@ struct CacheChanged {
 
 pub(crate) fn start(app: AppHandle) -> Result<(), String> {
     let arxiv = Arc::new(ArxivClient::new()?);
-    tauri::async_runtime::spawn(coordinator_loop(app, arxiv));
+    let public_http = Arc::new(
+        reqwest::Client::builder()
+            .user_agent(PUBLIC_USER_AGENT)
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(25))
+            .build()
+            .map_err(|error| format!("failed to create source HTTP client: {error}"))?,
+    );
+    tauri::async_runtime::spawn(coordinator_loop(app, arxiv, public_http));
     Ok(())
 }
 
@@ -88,7 +97,11 @@ pub(crate) fn request_manual_for_widget(id: i64, state: &AppState) -> Result<(),
     Ok(())
 }
 
-async fn coordinator_loop(app: AppHandle, arxiv: Arc<ArxivClient>) {
+async fn coordinator_loop(
+    app: AppHandle,
+    arxiv: Arc<ArxivClient>,
+    public_http: Arc<reqwest::Client>,
+) {
     loop {
         let now = match unix_seconds() {
             Ok(now) => now,
@@ -127,8 +140,9 @@ async fn coordinator_loop(app: AppHandle, arxiv: Arc<ArxivClient>) {
         for key in ready {
             let app = app.clone();
             let arxiv = arxiv.clone();
+            let public_http = public_http.clone();
             tauri::async_runtime::spawn(async move {
-                run_refresh(app, arxiv, key).await;
+                run_refresh(app, arxiv, public_http, key).await;
             });
         }
 
@@ -248,7 +262,12 @@ fn take_ready_work(app: &AppHandle, now: i64) -> Result<(Vec<SourceKey>, Option<
     Ok((ready, next_wakeup))
 }
 
-async fn run_refresh(app: AppHandle, arxiv: Arc<ArxivClient>, key: SourceKey) {
+async fn run_refresh(
+    app: AppHandle,
+    arxiv: Arc<ArxivClient>,
+    public_http: Arc<reqwest::Client>,
+    key: SourceKey,
+) {
     let attempt_started = match unix_seconds() {
         Ok(now) => now,
         Err(error) => {
@@ -269,6 +288,14 @@ async fn run_refresh(app: AppHandle, arxiv: Arc<ArxivClient>, key: SourceKey) {
 
     let result = match key.source_kind.as_str() {
         "arxiv" => arxiv.fetch(&key.source_config_json, attempt_started).await,
+        "wikipedia" => {
+            sources::wikipedia::fetch(&public_http, &key.source_config_json, attempt_started).await
+        }
+        "qiita" => sources::qiita::fetch(&public_http, &key.source_config_json, attempt_started).await,
+        "zenn" => sources::zenn::fetch(&public_http, &key.source_config_json, attempt_started).await,
+        "youtube" => {
+            sources::youtube::fetch(&public_http, &key.source_config_json, attempt_started).await
+        }
         other => Err(format!("no refresh adapter is implemented for {other}")),
     };
 

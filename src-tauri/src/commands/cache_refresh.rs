@@ -154,17 +154,17 @@ pub(crate) fn list_compact_items(
         if compact.len() >= limit || !sources::is_supported(&widget.source_kind) {
             continue;
         }
-        let normalized = match sources::normalize_config(&widget.source_kind, &widget.source_config_json)
-        {
-            Ok(config) => config,
-            Err(error) => {
-                eprintln!(
-                    "ignoring invalid Compact {} source configuration: {error}",
-                    widget.source_kind
-                );
-                continue;
-            }
-        };
+        let normalized =
+            match sources::normalize_config(&widget.source_kind, &widget.source_config_json) {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!(
+                        "ignoring invalid Compact {} source configuration: {error}",
+                        widget.source_kind
+                    );
+                    continue;
+                }
+            };
         if !visited_sources.insert((widget.source_kind.clone(), normalized.clone())) {
             continue;
         }

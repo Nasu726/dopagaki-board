@@ -120,7 +120,7 @@ The app is intended to stay resident. If nothing useful is due, it should actual
 - performance policy/results: `PERFORMANCE.md` / `PERF_BASELINE.md`
 - long-running agent discipline: `AGENTS.md`
 
-Do not copy the same transient status into all of them. Historical notes such as `REFRESH_PATH_REFACTOR.md` should be clearly marked as historical.
+Keep durable docs focused on current behavior, decisions, and reusable traps. Historical implementation detail belongs in merged Issues/PRs/commits unless it still explains an active constraint or recurring failure mode.
 
 ## Restart checklist
 

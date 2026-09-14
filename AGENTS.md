@@ -68,4 +68,6 @@ If implementation forces a currently open product/architecture decision, update 
 
 Keep short-lived progress in the Issue/PR and `docs/ACTIVE_WORK.md`; keep reusable debugging knowledge or non-obvious invariants in `docs/HANDOFF.md`. Update the smallest authoritative specification document that owns changed behavior.
 
+Keep durable documentation signal-dense. Discarded product/source/tool options belong in Issues, PRs, or history rather than being preserved solely to say they are unsupported. Retain a negative constraint only when omitting it creates a realistic risk of product regression, correctness/security error, or repeated wasted work.
+
 Repository documents, not temporary chat context, carry decisions and reusable implementation knowledge across sessions.

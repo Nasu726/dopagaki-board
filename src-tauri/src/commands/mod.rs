@@ -3,7 +3,7 @@ pub(crate) mod cache_refresh;
 use crate::{
     app::{self, AppState, ShellStatus, ViewEvent, ViewState, GLOBAL_SHORTCUT_SETTING_KEY},
     db::{self, widgets::WidgetLayout},
-    runtime, sources,
+    refresh_policy, runtime, sources,
 };
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -182,6 +182,38 @@ pub(crate) fn update_widget_source_config(
 }
 
 #[tauri::command]
+pub(crate) fn update_widget_refresh_config(
+    id: i64,
+    refresh_config_json: String,
+    state: State<'_, AppState>,
+) -> Result<WidgetLayout, String> {
+    if id <= 0 {
+        return Err("widget id must be positive".to_owned());
+    }
+    let normalized = refresh_policy::normalize_widget_config(&refresh_config_json)?;
+
+    let updated = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
+        let mut widget = db::widgets::get(&connection, id)
+            .map_err(|error| format!("failed to read widget: {error}"))?
+            .ok_or_else(|| "widget was not found".to_owned())?;
+        let found = db::widgets::update_refresh_config(&connection, id, &normalized)
+            .map_err(|error| format!("failed to update widget refresh configuration: {error}"))?;
+        if !found {
+            return Err("widget was not found".to_owned());
+        }
+        widget.refresh_config_json = normalized;
+        widget
+    };
+
+    runtime::wake(&state);
+    Ok(updated)
+}
+
+#[tauri::command]
 pub(crate) fn update_widget_geometry(
     id: i64,
     x: f64,
@@ -330,6 +362,7 @@ fn reject_overlap(
         .map_err(|error| format!("failed to validate Board geometry: {error}"))?;
     if widgets.iter().any(|widget| {
         Some(widget.id) != excluded_id
+            && validate_grid_geometry(widget.x, widget.y, widget.width, widget.height).is_ok()
             && rectangles_overlap(
                 (x, y, width, height),
                 (widget.x, widget.y, widget.width, widget.height),

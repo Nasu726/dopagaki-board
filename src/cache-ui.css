@@ -100,11 +100,12 @@
 }
 
 .board-widget__content {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  grid-auto-rows: minmax(58px, auto);
+  align-content: start;
   gap: 5px;
   padding: 5px;
-  background: #f7f8fa;
 }
 
 .board-feed-item {
@@ -113,8 +114,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   min-width: 0;
-  min-height: 0;
-  flex: 1 1 0;
+  min-height: 58px;
   gap: 7px;
   overflow: hidden;
   padding: 7px;
@@ -132,8 +132,7 @@
 
 .board-feed-item__image {
   width: 46px;
-  height: 100%;
-  max-height: 48px;
+  height: 46px;
   border-radius: 7px;
   object-fit: cover;
   background: #e9edf2;
@@ -152,7 +151,7 @@
   font-weight: 680;
   line-height: 1.25;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
 }
 
 .board-feed-item__meta {
@@ -166,153 +165,25 @@
 .board-widget__empty {
   display: grid;
   place-items: center;
+  grid-column: 1 / -1;
   width: 100%;
-  height: 100%;
+  min-height: 100%;
   color: #9aa1ab;
   font-size: 10px;
   text-align: center;
 }
 
-.board-widget__refresh {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  color: #89929f;
-  background: transparent;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.board-widget:hover .board-widget__refresh,
-.board-widget:focus-within .board-widget__refresh {
-  opacity: 1;
-}
-
-.board-widget__refresh:hover {
-  color: #46556b;
-  background: #edf1f6;
-}
-
-.board-widget__refresh:disabled {
-  opacity: 0.45;
-  cursor: wait;
-}
-
-.refresh-popover {
-  position: absolute;
-  z-index: 200;
-  top: 48px;
-  right: 44px;
-  width: min(280px, calc(100% - 32px));
-  padding: 12px;
-  border: 1px solid rgba(28, 37, 52, 0.1);
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.99);
-  box-shadow: 0 12px 34px rgba(31, 41, 57, 0.14);
-}
-
-.refresh-popover__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.refresh-popover__header strong {
-  margin-right: auto;
-  color: #303744;
-  font-size: 11px;
-}
-
-.refresh-popover__header button {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  color: #8c949f;
-  background: transparent;
-  cursor: pointer;
-}
-
-.refresh-popover__control {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-}
-
-.refresh-popover input[type="range"] {
-  width: 100%;
-  min-width: 0;
-  accent-color: #557fda;
-}
-
-.refresh-popover output {
-  min-width: 58px;
-  color: #39414d;
-  font-size: 10px;
-  font-weight: 700;
-  text-align: right;
-}
-
-.refresh-popover__help,
-.refresh-popover__error {
-  margin: 8px 0 0;
-  font-size: 9px;
-  line-height: 1.35;
-}
-
-.refresh-popover__help {
-  color: #8a929d;
-}
-
-.refresh-popover__error {
-  color: #9c4949;
-}
-
-
-/* widget-source-config */
-.board-widget__config {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  color: #89929f;
-  background: transparent;
-  opacity: 0;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -1px;
-  cursor: pointer;
-}
-
-.board-widget:hover .board-widget__config,
-.board-widget:focus-within .board-widget__config {
-  opacity: 1;
-}
-
-.board-widget__config:hover,
-.board-widget__config:focus-visible {
-  color: #46556b;
-  background: #edf1f6;
-}
-
 .board-widget-config {
   position: absolute;
   z-index: 30;
-  inset: 28px 6px 6px;
+  inset: 28px 5px 5px;
   display: grid;
   align-content: start;
   gap: 7px;
   overflow: auto;
   padding: 9px;
   border: 1px solid rgba(28, 37, 52, 0.1);
-  border-radius: 12px;
+  border-radius: 11px;
   color: #303743;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 8px 24px rgba(31, 41, 57, 0.12);
@@ -361,14 +232,12 @@
   min-width: 0;
   width: 100%;
   height: 28px;
-  box-sizing: border-box;
   padding: 5px 7px;
   border: 1px solid #e1e5ea;
   border-radius: 8px;
   outline: none;
   color: #303743;
   background: #fafbfc;
-  font: inherit;
   font-size: 10px;
   font-weight: 500;
   user-select: text;

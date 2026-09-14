@@ -185,7 +185,10 @@ mod tests {
             resolve_widget_interval("{}", Some(3600)).unwrap(),
             Some(3600)
         );
-        assert_eq!(resolve_widget_interval(r#"{"mode":"off"}"#, Some(3600)).unwrap(), None);
+        assert_eq!(
+            resolve_widget_interval(r#"{"mode":"off"}"#, Some(3600)).unwrap(),
+            None
+        );
         assert_eq!(
             resolve_widget_interval(
                 r#"{"mode":"interval","autoIntervalSeconds":7200}"#,
@@ -199,13 +202,22 @@ mod tests {
     #[test]
     fn source_choice_roundtrip_uses_global_only_for_inherit() {
         let connection = database();
-        assert_eq!(read_source_default(&connection, "arxiv", Some(3600)).unwrap(), Some(3600));
+        assert_eq!(
+            read_source_default(&connection, "arxiv", Some(3600)).unwrap(),
+            Some(3600)
+        );
 
         write_source_choice(&connection, "arxiv", &IntervalChoice::Off).unwrap();
-        assert_eq!(read_source_default(&connection, "arxiv", Some(3600)).unwrap(), None);
+        assert_eq!(
+            read_source_default(&connection, "arxiv", Some(3600)).unwrap(),
+            None
+        );
 
         write_source_choice(&connection, "arxiv", &IntervalChoice::Seconds(7200)).unwrap();
-        assert_eq!(read_source_default(&connection, "arxiv", Some(3600)).unwrap(), Some(7200));
+        assert_eq!(
+            read_source_default(&connection, "arxiv", Some(3600)).unwrap(),
+            Some(7200)
+        );
     }
 
     #[test]

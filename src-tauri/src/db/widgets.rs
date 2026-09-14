@@ -201,8 +201,8 @@ mod tests {
         assert_eq!(
             list_distinct_source_configs(&connection).expect("sources should list"),
             vec![
-                ("arxiv".to_owned(), "{}".to_owned()),
                 ("arxiv".to_owned(), r#"{"query":"cat:cs.LG"}"#.to_owned(),),
+                ("arxiv".to_owned(), "{}".to_owned()),
                 ("youtube".to_owned(), "{}".to_owned()),
             ]
         );

@@ -204,16 +204,16 @@ fn collect_source_intervals(
                 value
             }
         };
-        let widget_interval = match refresh_policy::resolve_widget_interval(
-            &refresh_config_json,
-            inherited,
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                eprintln!("ignoring invalid {source_kind} widget refresh configuration: {error}");
-                inherited
-            }
-        };
+        let widget_interval =
+            match refresh_policy::resolve_widget_interval(&refresh_config_json, inherited) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!(
+                        "ignoring invalid {source_kind} widget refresh configuration: {error}"
+                    );
+                    inherited
+                }
+            };
         let effective = sources::effective_auto_interval(&source_kind, widget_interval);
         intervals
             .entry(key)

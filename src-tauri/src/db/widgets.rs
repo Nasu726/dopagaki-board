@@ -169,14 +169,12 @@ mod tests {
     fn widget_geometry_roundtrip_works() {
         let connection = database();
 
-        let widget = create(&connection, "arxiv", 1.0, 1.0, 4.0, 3.0)
-            .expect("widget should be created");
+        let widget =
+            create(&connection, "arxiv", 1.0, 1.0, 4.0, 3.0).expect("widget should be created");
         assert_eq!(widget.source_config_json, "{}");
         assert_eq!(widget.refresh_config_json, "{}");
-        assert!(
-            update_geometry(&connection, widget.id, 2.0, 2.0, 5.0, 3.0,)
-                .expect("geometry should update")
-        );
+        assert!(update_geometry(&connection, widget.id, 2.0, 2.0, 5.0, 3.0,)
+            .expect("geometry should update"));
 
         let widgets = list(&connection).expect("widgets should list");
         assert_eq!(widgets.len(), 1);
@@ -192,8 +190,8 @@ mod tests {
     #[test]
     fn source_and_refresh_configs_update_without_touching_geometry() {
         let connection = database();
-        let widget = create(&connection, "arxiv", 1.0, 1.0, 4.0, 3.0)
-            .expect("widget should be created");
+        let widget =
+            create(&connection, "arxiv", 1.0, 1.0, 4.0, 3.0).expect("widget should be created");
 
         assert!(
             update_source_config(&connection, widget.id, r#"{"query":"cat:cs.LG"}"#)

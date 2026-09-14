@@ -2,10 +2,11 @@ use crate::{
     app::AppState,
     commands::publish_shell_status,
     db::{self, refresh_state::SourceRefreshState},
-    refresh_settings,
+    refresh_policy, refresh_settings,
     scheduler::SourceKey,
     sources::{self, arxiv::ArxivClient},
 };
+use rusqlite::Connection;
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -62,7 +63,8 @@ pub(crate) fn request_manual_for_widget(id: i64, state: &AppState) -> Result<(),
             db::refresh_state::get(&connection, &key.source_kind, &key.source_config_json)
                 .map_err(|error| format!("failed to read source refresh state: {error}"))?;
         let global_interval = refresh_settings::read(&connection)?;
-        let auto_interval = sources::effective_auto_interval(&key.source_kind, global_interval);
+        let intervals = collect_source_intervals(&connection, global_interval)?;
+        let auto_interval = intervals.get(&key).copied().flatten();
         (key, persisted, auto_interval)
     };
 
@@ -136,37 +138,22 @@ async fn coordinator_loop(app: AppHandle, arxiv: Arc<ArxivClient>) {
 
 fn sync_scheduler_sources(app: &AppHandle, now: i64) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let (global_interval, snapshots) = {
+    let snapshots = {
         let connection = state
             .db
             .lock()
             .map_err(|_| "database lock was poisoned".to_owned())?;
         let global_interval = refresh_settings::read(&connection)?;
-        let source_configs = db::widgets::list_distinct_source_configs(&connection)
-            .map_err(|error| format!("failed to list widget sources: {error}"))?;
+        let intervals = collect_source_intervals(&connection, global_interval)?;
 
-        let mut snapshots: HashMap<SourceKey, SourceRefreshState> = HashMap::new();
-        for (source_kind, source_config_json) in source_configs {
-            if !sources::is_supported(&source_kind) {
-                continue;
-            }
-
-            let key = match source_key(source_kind.clone(), source_config_json) {
-                Ok(key) => key,
-                Err(error) => {
-                    eprintln!("ignoring invalid {source_kind} source configuration: {error}");
-                    continue;
-                }
-            };
-            if snapshots.contains_key(&key) {
-                continue;
-            }
+        let mut snapshots: HashMap<SourceKey, (SourceRefreshState, Option<u64>)> = HashMap::new();
+        for (key, interval) in intervals {
             let persisted =
                 db::refresh_state::get(&connection, &key.source_kind, &key.source_config_json)
                     .map_err(|error| format!("failed to read source refresh state: {error}"))?;
-            snapshots.insert(key, persisted);
+            snapshots.insert(key, (persisted, interval));
         }
-        (global_interval, snapshots)
+        snapshots
     };
 
     let active: HashSet<SourceKey> = snapshots.keys().cloned().collect();
@@ -174,8 +161,7 @@ fn sync_scheduler_sources(app: &AppHandle, now: i64) -> Result<(), String> {
         .scheduler
         .lock()
         .map_err(|_| "scheduler lock was poisoned".to_owned())?;
-    for (key, persisted) in snapshots {
-        let auto_interval = sources::effective_auto_interval(&key.source_kind, global_interval);
+    for (key, (persisted, auto_interval)) in snapshots {
         scheduler.sync_source_with_persisted_state(
             key,
             now,
@@ -187,6 +173,63 @@ fn sync_scheduler_sources(app: &AppHandle, now: i64) -> Result<(), String> {
     }
     scheduler.disable_missing_sources(&active);
     Ok(())
+}
+
+fn collect_source_intervals(
+    connection: &Connection,
+    global_interval: Option<u64>,
+) -> Result<HashMap<SourceKey, Option<u64>>, String> {
+    let rows = db::widgets::list_scheduler_source_configs(connection)
+        .map_err(|error| format!("failed to list widget refresh policies: {error}"))?;
+    let mut source_defaults: HashMap<String, Option<u64>> = HashMap::new();
+    let mut intervals: HashMap<SourceKey, Option<u64>> = HashMap::new();
+
+    for (source_kind, source_config_json, refresh_config_json) in rows {
+        if !sources::is_supported(&source_kind) {
+            continue;
+        }
+        let key = match source_key(source_kind.clone(), source_config_json) {
+            Ok(key) => key,
+            Err(error) => {
+                eprintln!("ignoring invalid {source_kind} source configuration: {error}");
+                continue;
+            }
+        };
+        let inherited = match source_defaults.get(&source_kind) {
+            Some(value) => *value,
+            None => {
+                let value =
+                    refresh_policy::read_source_default(connection, &source_kind, global_interval)?;
+                source_defaults.insert(source_kind.clone(), value);
+                value
+            }
+        };
+        let widget_interval = match refresh_policy::resolve_widget_interval(
+            &refresh_config_json,
+            inherited,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("ignoring invalid {source_kind} widget refresh configuration: {error}");
+                inherited
+            }
+        };
+        let effective = sources::effective_auto_interval(&source_kind, widget_interval);
+        intervals
+            .entry(key)
+            .and_modify(|current| *current = combine_intervals(*current, effective))
+            .or_insert(effective);
+    }
+
+    Ok(intervals)
+}
+
+fn combine_intervals(current: Option<u64>, next: Option<u64>) -> Option<u64> {
+    match (current, next) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
 }
 
 fn take_ready_work(app: &AppHandle, now: i64) -> Result<(Vec<SourceKey>, Option<i64>), String> {
@@ -424,5 +467,13 @@ mod tests {
         ];
 
         assert_eq!(matching_widget_ids(&widget_sources, &key), vec![1, 2]);
+    }
+
+    #[test]
+    fn shared_source_uses_most_eager_enabled_interval() {
+        assert_eq!(combine_intervals(None, None), None);
+        assert_eq!(combine_intervals(None, Some(7200)), Some(7200));
+        assert_eq!(combine_intervals(Some(7200), None), Some(7200));
+        assert_eq!(combine_intervals(Some(7200), Some(3600)), Some(3600));
     }
 }

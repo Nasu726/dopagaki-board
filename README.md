@@ -6,7 +6,7 @@ Lightweight desktop discovery board for ambient feeds and one-click content acce
 
 The functional MVP is in real-use expansion. The app is Tauri 2 + a Rust core + local SQLite with a deliberately small Vanilla TypeScript/WebView presentation layer.
 
-Working source adapters are **arXiv, Wikipedia, Qiita, Zenn, and selected-channel YouTube RSS**. The add picker exposes only real adapters; NHK is intentionally out of scope. YouTube RSS works without Google credentials. Optional YouTube Data API enrichment will use a user-supplied key, with OAuth/subscription-aware discovery deferred to a later update.
+Working source adapters are **arXiv, Wikipedia, Qiita, Zenn, and selected-channel YouTube RSS**. YouTube RSS works without Google credentials. Optional YouTube Data API enrichment will use a user-supplied key, with OAuth/subscription-aware discovery deferred to a later update.
 
 The first practical Windows release-build observation measured about 109 MB Idle memory with Task Manager displaying 0% CPU and 0 Mbps network traffic during the observation. Treat this as a practical baseline, not a lab benchmark; details and caveats are in `docs/PERF_BASELINE.md`.
 
@@ -32,25 +32,22 @@ Keep interesting sources quietly present on the desktop without demanding attent
 - Cache-first and local-first.
 - Freshness matters, but foreground responsiveness matters more.
 - Lightweightness is a product feature, not a final polish step.
-- Never pretend an unimplemented source works by showing placeholder data.
 
 ## Documentation map
 
 Use each document for one job instead of copying the same status everywhere:
 
-- `docs/PRODUCT_SPEC.md` — current product behavior and non-goals.
+- `docs/PRODUCT_SPEC.md` — current product behavior.
 - `docs/UX_AND_DESIGN.md` — interaction and visual rules.
 - `docs/ARCHITECTURE.md` — current technical boundaries and invariants.
 - `docs/REFRESH_POLICY.md` — refresh-resolution semantics.
 - `docs/PERFORMANCE.md` — performance budgets and measurement discipline.
 - `docs/PERF_BASELINE.md` — measured observations and reproducible procedures.
 - `docs/ROADMAP.md` — completed/current/future implementation stages.
-- `docs/DECISIONS.md` — settled choices and deliberately open questions; this wins when an older document conflicts.
+- `docs/DECISIONS.md` — settled choices and deliberately open questions.
 - `docs/ACTIVE_WORK.md` — short-lived branch checkpoint and immediate next gate.
 - `docs/HANDOFF.md` — durable implementation knowledge, incidents, and restart traps.
 - `AGENTS.md` — development discipline for long-running agent work.
-
-GitHub Issue #1 is a frozen snapshot of the initial planning discussion, not the current specification. Issue/PR state is authoritative for task completion; settled product decisions belong in `docs/DECISIONS.md`.
 
 ## Development
 

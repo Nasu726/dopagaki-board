@@ -14,11 +14,9 @@ Document authority is intentionally split:
 - durable operational/debugging knowledge: `docs/HANDOFF.md`
 - measured performance: `docs/PERF_BASELINE.md`
 
-GitHub Issue #1 is a frozen initial planning snapshot. Do not revive an old statement from it or another historical document when a newer decision/specification supersedes it.
-
 ## Product invariants
 
-Do not violate these without recording a deliberate decision change:
+Changing an invariant requires an explicit product/architecture decision:
 
 - Content is visually more important than app decoration.
 - Idle is a genuinely transparent tiny circular orb with no content rendering.
@@ -27,8 +25,7 @@ Do not violate these without recording a deliberate decision change:
 - Clicking empty Board space is a primary add-widget interaction.
 - Compact source priority follows Board spatial order by default: top-to-bottom, then left-to-right.
 - Compact surfaces only currently active Board widget sources; stale cache alone never makes a deleted source visible.
-- Add UI exposes only adapters that actually work. Never substitute seeded/fake placeholder content for an adapter.
-- NHK is out of scope unless the product decision is explicitly changed.
+- Add UI contains only working adapters and uses real source content.
 - Startup is cache-first and never waits for network.
 - Rust owns core application logic; the WebView is replaceable presentation.
 - SQLite is the local persistent store.
@@ -37,11 +34,11 @@ Do not violate these without recording a deliberate decision change:
 
 ## Implementation discipline
 
-Prefer the simplest implementation that preserves the above behavior. Do not add a dependency for functionality that is trivial to implement directly unless the dependency materially improves correctness or maintenance enough to justify its permanent footprint.
+Prefer the simplest implementation that preserves the above behavior. Add a dependency only when it materially improves correctness or maintenance enough to justify its permanent footprint.
 
-Avoid premature abstraction. If a module exists only to forward calls and has no meaningful boundary, flatten it. Conversely, split a file when independent concerns have become large enough that review/navigation suffer; do not use file size alone as a reason to invent a framework.
+Avoid premature abstraction. Flatten forwarding-only modules. Conversely, split a file when independent concerns have become large enough that review/navigation suffer; file size alone is not a reason to invent a framework.
 
-Use bounded concurrency. Avoid unbounded per-widget tasks. Widgets sharing one canonical source instance share refresh/cache work. Prefer event/deadline-driven work to frequent polling.
+Use bounded concurrency. Widgets sharing one canonical source instance share refresh/cache work. Prefer event/deadline-driven work to frequent polling.
 
 ## Performance loop
 
@@ -54,21 +51,21 @@ Look specifically for unnecessary dependencies, duplicated state/cache, allocati
 - Unit-test scheduler/state/geometry/config-normalization logic where deterministic tests are practical.
 - Test cache-first behavior with network unavailable when it matters to the change.
 - Test state transitions independently of real external adapters.
-- Keep tests parallel where safe; do not serialize unrelated tests without reason.
+- Keep tests parallel where safe; serialize only tests that actually share constrained state/resources.
 - Add regression tests for bugs that affect persistence, scheduling, source membership, or one-click navigation.
 - Linux, Windows, and macOS release-build CI must all be green before merge.
-- CI is not a substitute for real GUI/network smoke testing when behavior depends on the desktop shell or a live source.
+- Real GUI/network behavior requires desktop smoke testing when CI cannot exercise it.
 
 ## UI development
 
-Design geometry before decoration. Do not turn Compact or Board into a generic equal-card dashboard. Grid alignment is a direct-manipulation constraint, not a requirement that widgets share one size.
+Design geometry before decoration. Compact and Board are not generic equal-card dashboards; grid alignment constrains direct manipulation, not widget size.
 
-Source-specific minimal rendering is intentional. Do not add metadata simply because it is available. Use familiar window-control semantics where they map cleanly; otherwise provide an explicit tooltip/accessible label.
+Source-specific minimal rendering is intentional. Add metadata only when it improves the click decision. Use familiar window-control semantics where they map cleanly; otherwise provide an explicit tooltip/accessible label.
 
 ## Decision and handoff hygiene
 
 If implementation forces a currently open product/architecture decision, update `docs/DECISIONS.md` in the same change. If a confirmed decision changes, record what changed and why.
 
-Do not copy transient branch status into every durable specification document. Keep short-lived progress in the Issue/PR and `docs/ACTIVE_WORK.md`; keep reusable debugging knowledge or non-obvious invariants in `docs/HANDOFF.md`.
+Keep short-lived progress in the Issue/PR and `docs/ACTIVE_WORK.md`; keep reusable debugging knowledge or non-obvious invariants in `docs/HANDOFF.md`. Update the smallest authoritative specification document that owns changed behavior.
 
-When a feature changes current behavior, update the smallest authoritative specification document that owns that behavior. Do not rely on temporary chat context for decisions or knowledge that future work must know.
+Repository documents, not temporary chat context, carry decisions and reusable implementation knowledge across sessions.

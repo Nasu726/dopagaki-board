@@ -8,8 +8,6 @@ Current checkpoint (2026-09-15): **functional MVP is in real-use expansion.** Th
 - [x] Decision log and handoff protocol.
 - [x] Documentation roles clarified so transient branch state does not masquerade as durable specification.
 
-Figma comparison/mock work is optional and should be revisited only when real-use feedback reveals a visual ambiguity worth resolving before code.
-
 ## Phase 1 — smallest runnable shell
 
 - [x] Tauri 2 + Rust core boundary.
@@ -29,7 +27,7 @@ Figma comparison/mock work is optional and should be revisited only when real-us
 ## Phase 3 — responsive Board
 
 - [x] Empty-space add flow.
-- [x] Responsive logical 12×8 grid replacing free-pixel persistence.
+- [x] Responsive logical 12×8 grid persistence.
 - [x] Grid-snapped drag and eight-direction resize.
 - [x] Non-overlap without neighbor push/reflow.
 - [x] Gesture-end persistence and legacy pixel-layout conversion.
@@ -58,15 +56,15 @@ PR #52's remaining gate is evidence, not adapter implementation: real desktop sm
 
 ## Phase 6 — API-assisted discovery and media discipline
 
-Add Data API capability incrementally, beginning with `@handle` resolution/validation and only then useful visible metadata or bounded candidate discovery. Never embed a shared Google API key. Avoid API/background work whose result is not currently useful.
+Add Data API capability incrementally, beginning with `@handle` resolution/validation and only then useful visible metadata or bounded candidate discovery. API credentials are user-supplied; API/background work stays bounded to useful results.
 
 For media loading: visible thumbnails first; near-visible preload only when justified; off-screen preload only after measurement; foreground work always wins.
 
 ## Phase 7 — recommendation
 
-Recommendation/ranking is application-owned. Do not assume YouTube exposes a supported endpoint reproducing the user's current Home recommendations.
+Recommendation/ranking is application-owned. RSS/API/OAuth may broaden the candidate pool, while ranking remains separate and bounded by cache/quota budgets.
 
-Start with transparent heuristics: freshness, already-shown penalty, click history, channel preference, and controlled randomness. RSS/API/OAuth may broaden the candidate pool, while ranking remains separate and bounded by cache/quota budgets. Tune only after real usage data exists.
+Start with transparent heuristics: freshness, already-shown penalty, click history, channel preference, and controlled randomness. Tune only after real usage data exists.
 
 ## Phase 8 — recurring simplification and real use
 
@@ -78,7 +76,7 @@ This is a loop, not an end phase:
 4. fix observed friction
 5. repeat
 
-Do not infer performance wins from structural refactors without measurement.
+Performance wins require measurement rather than inference from structural refactors alone.
 
 ## Phase 9 — native decision
 

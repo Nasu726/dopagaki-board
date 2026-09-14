@@ -4,11 +4,11 @@
 
 Use light/white restrained surfaces, soft rounded geometry, minimal chrome, subtle separation only where spatially useful, and real content imagery as the main source of color. Avoid decorative gradients competing with content, excessive glassmorphism, card-within-card layouts, repeated oversized headers, heavy shadows, permanent controls that could be contextual, and decorative animation in Idle.
 
-The governing rules are `Content > app decoration` and, where usability is preserved, `Less UI > more UI`. Real desktop feedback is the current design authority; Figma work is optional when a future visual ambiguity genuinely benefits from it.
+The governing rules are `Content > app decoration` and, where usability is preserved, `Less UI > more UI`.
 
 ## Idle
 
-- Circular translucent orb / おはじき, not a square window painted with a circle.
+- Circular translucent orb / おはじき.
 - Pixels outside the circle are transparent.
 - No content information or continuous animation.
 - Optional small boolean blue update dot.
@@ -27,7 +27,7 @@ Compact surfaces a few temptations immediately.
 
 ## Board geometry
 
-The Board is spatial but uses arbitrary **grid rectangles**, not arbitrary pixels.
+The Board uses responsive **grid rectangles**.
 
 - Responsive virtual grid: 12 columns × 8 rows; grid lines may remain invisible.
 - Widget boundaries lie on grid lines and widgets may have different integer sizes.
@@ -41,25 +41,23 @@ The Board is spatial but uses arbitrary **grid rectangles**, not arbitrary pixel
 
 ## Custom window chrome
 
-The undecorated Tauri window must still behave like a familiar desktop window. The toolbar region is draggable; Compact offers collapse-to-Idle and open-Board controls; Board offers collapse-to-Idle and restore-to-Compact controls. Use familiar glyph semantics plus explicit `title`/accessible labels. Application settings belong behind one gear entry.
+The undecorated Tauri window behaves like a familiar desktop window. The toolbar region is draggable; Compact offers collapse-to-Idle and open-Board controls; Board offers collapse-to-Idle and restore-to-Compact controls. Use familiar glyph semantics plus explicit `title`/accessible labels. Application settings belong behind one gear entry.
 
 ## Board add/config flow
 
 1. Click empty Board space.
-2. Choose a **working** source from the anchored picker.
+2. Choose a working source from the anchored picker.
 3. The widget is created in the nearest valid free rectangle.
 4. Sources with useful defaults can work immediately; sources requiring essential setup may open their widget-local editor immediately.
 5. Later configuration remains available from the widget settings control.
 
-YouTube currently uses the setup-required variant: adding it opens the channel editor. Cancelling does **not** delete the widget; the empty/dormant widget remains so the user can retry without repeating placement.
-
-Do not expose planned-but-unimplemented sources as placeholders.
+YouTube uses the setup-required variant: adding it opens the channel editor. Cancelling keeps the empty/dormant widget so the user can retry without repeating placement.
 
 ## Source presentation
 
 ### arXiv
 
-Title-centric. A small widget may scroll; a larger widget should use the extra content area. Author metadata is useful; fake thumbnails are not.
+Title-centric. A small widget may scroll; a larger widget should use the extra content area. Author metadata is useful.
 
 ### Wikipedia
 
@@ -67,7 +65,7 @@ Image + title when PageImages provides an image, with a full-width text fallback
 
 ### Qiita
 
-Title/author-oriented public items. Available source imagery may be used, but rendering must remain correct without it.
+Title/author-oriented public items. Available source imagery may be used, but rendering remains correct without it.
 
 ### Zenn
 
@@ -79,7 +77,7 @@ Thumbnail-first. The current RSS slice shows selected-channel uploads with deriv
 
 ### YouTube recommendations / richer discovery
 
-Future Data API/OAuth work may broaden candidate collection, but ranking remains app-owned. Add metadata only where it materially helps the click decision; do not turn the widget into YouTube Web.
+Future Data API/OAuth work may broaden candidate collection. Add metadata only where it materially helps the click decision.
 
 ## Refresh interaction
 
@@ -93,4 +91,4 @@ Expected transitions: Idle -> Compact, Compact -> Idle, Board -> Idle, Hidden ->
 
 ## Deletion pass
 
-After an interaction becomes usable, remove elements until further removal harms discoverability or control. Do not preserve MVP scaffolding merely because it exists.
+After an interaction becomes usable, remove elements until further removal harms discoverability or control. Remove MVP scaffolding once it no longer serves a current interaction.

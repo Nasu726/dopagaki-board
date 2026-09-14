@@ -1,8 +1,6 @@
 use rusqlite::{params, Connection, Result};
 use serde::Serialize;
 
-pub(crate) const DEMO_SEED_SETTING_KEY: &str = "cache.demo_seeded_v1";
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CachedItem {
@@ -32,62 +30,6 @@ pub(crate) struct CacheWriteItem {
     pub(crate) fetched_at: i64,
     pub(crate) score: f64,
     pub(crate) payload_json: String,
-}
-
-pub(crate) fn seed_demo_items(connection: &Connection, now: i64) -> Result<()> {
-    let items = [
-        (
-            "demo:youtube:1",
-            "youtube",
-            "https://www.youtube.com/",
-            "Subscribed channel placeholder",
-            100.0,
-        ),
-        (
-            "demo:arxiv:1",
-            "arxiv",
-            "https://arxiv.org/",
-            "Interesting paper placeholder",
-            90.0,
-        ),
-        (
-            "demo:wikipedia:1",
-            "wikipedia",
-            "https://ja.wikipedia.org/",
-            "今日のおすすめ placeholder",
-            80.0,
-        ),
-        (
-            "demo:zenn:1",
-            "zenn",
-            "https://zenn.dev/",
-            "Zenn article placeholder",
-            70.0,
-        ),
-        (
-            "demo:qiita:1",
-            "qiita",
-            "https://qiita.com/",
-            "Qiita article placeholder",
-            60.0,
-        ),
-        (
-            "demo:nhk:1",
-            "nhk",
-            "https://www3.nhk.or.jp/news/",
-            "NHK News placeholder",
-            50.0,
-        ),
-    ];
-
-    for (id, source_kind, external_url, title, score) in items {
-        connection.execute(
-            "INSERT OR IGNORE INTO feed_items (\n               id, source_kind, source_config_json, external_url, title, fetched_at, score, is_unseen\n             ) VALUES (?1, ?2, '{}', ?3, ?4, ?5, ?6, 1)",
-            params![id, source_kind, external_url, title, now, score],
-        )?;
-    }
-
-    Ok(())
 }
 
 pub(crate) fn upsert_items(connection: &Connection, items: &[CacheWriteItem]) -> Result<usize> {
@@ -206,23 +148,14 @@ mod tests {
     }
 
     #[test]
-    fn demo_cache_is_immediately_readable_without_network() {
-        let connection = database();
-        seed_demo_items(&connection, 123).expect("demo cache should seed");
-
-        let items = list_top(&connection, 3).expect("cache should read");
-        assert_eq!(items.len(), 3);
-        assert_eq!(items[0].source_kind, "youtube");
-        assert!(items.iter().all(|item| item.fetched_at == 123));
-    }
-
-    #[test]
     fn source_query_and_seen_state_work() {
         let connection = database();
-        seed_demo_items(&connection, 123).expect("demo cache should seed");
+        let item = write_item("{}", "Cached paper", 123);
+        upsert_items(&connection, &[item]).expect("cache write should succeed");
 
         let arxiv = list_for_source(&connection, "arxiv", "{}", 5).expect("source should read");
         assert_eq!(arxiv.len(), 1);
+        assert_eq!(arxiv[0].title.as_deref(), Some("Cached paper"));
         assert!(has_unseen(&connection).expect("unseen should read"));
 
         mark_seen(&connection, &[arxiv[0].id.clone()]).expect("seen should update");
@@ -262,17 +195,6 @@ mod tests {
             .expect("second source should read");
         assert!(!graph[0].is_unseen);
         assert!(!hypergraph[0].is_unseen);
-    }
-
-    #[test]
-    fn seeding_is_idempotent() {
-        let connection = database();
-        seed_demo_items(&connection, 100).expect("first seed should succeed");
-        seed_demo_items(&connection, 200).expect("second seed should succeed");
-
-        let items = list_top(&connection, 100).expect("cache should read");
-        assert_eq!(items.len(), 6);
-        assert!(items.iter().all(|item| item.fetched_at == 100));
     }
 
     #[test]

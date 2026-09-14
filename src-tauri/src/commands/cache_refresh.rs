@@ -2,7 +2,7 @@ use super::publish_shell_status;
 use crate::{
     app::{AppState, ShellStatus},
     db::{self, cache::CachedItem},
-    refresh_settings, runtime, sources,
+    refresh_policy, refresh_settings, runtime, sources,
 };
 use serde::Serialize;
 use std::collections::HashSet;
@@ -15,6 +15,15 @@ const MAX_CACHE_LIMIT: usize = 100;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RefreshSettings {
     pub(crate) auto_interval_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SourceRefreshDefault {
+    pub(crate) source_kind: String,
+    pub(crate) mode: String,
+    pub(crate) auto_interval_seconds: Option<u64>,
+    pub(crate) effective_interval_seconds: Option<u64>,
 }
 
 #[tauri::command]
@@ -44,6 +53,62 @@ pub(crate) fn set_auto_refresh_interval(
     runtime::wake(&state);
     Ok(RefreshSettings {
         auto_interval_seconds,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn get_source_refresh_defaults(
+    state: State<'_, AppState>,
+) -> Result<Vec<SourceRefreshDefault>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "database lock was poisoned".to_owned())?;
+    let global = refresh_settings::read(&connection)?;
+    sources::supported_kinds()
+        .iter()
+        .map(|source_kind| source_refresh_default(&connection, source_kind, global))
+        .collect()
+}
+
+#[tauri::command]
+pub(crate) fn set_source_refresh_default(
+    source_kind: String,
+    mode: String,
+    auto_interval_seconds: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<SourceRefreshDefault, String> {
+    if !sources::is_supported(&source_kind) {
+        return Err("source does not have a working adapter".to_owned());
+    }
+    let choice = refresh_policy::parse_choice(&mode, auto_interval_seconds)?;
+    let result = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
+        refresh_policy::write_source_choice(&connection, &source_kind, &choice)?;
+        let global = refresh_settings::read(&connection)?;
+        source_refresh_default(&connection, &source_kind, global)?
+    };
+    runtime::wake(&state);
+    Ok(result)
+}
+
+fn source_refresh_default(
+    connection: &rusqlite::Connection,
+    source_kind: &str,
+    global: Option<u64>,
+) -> Result<SourceRefreshDefault, String> {
+    let choice = refresh_policy::read_source_choice(connection, source_kind)?;
+    let (mode, auto_interval_seconds) = refresh_policy::choice_parts(&choice);
+    let configured = refresh_policy::read_source_default(connection, source_kind, global)?;
+    let effective_interval_seconds = sources::effective_auto_interval(source_kind, configured);
+    Ok(SourceRefreshDefault {
+        source_kind: source_kind.to_owned(),
+        mode: mode.to_owned(),
+        auto_interval_seconds,
+        effective_interval_seconds,
     })
 }
 

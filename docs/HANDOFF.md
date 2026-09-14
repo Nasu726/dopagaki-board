@@ -32,6 +32,7 @@ There is one active product branch:
 - branch: `real-source-adapters-clean`
 - draft PR: #52, `Ship real Wikipedia, Qiita, Zenn and YouTube source adapters`
 - parent issue: #48
+- YouTube Data API follow-up: #53
 
 PR #52 currently has real backend adapters for:
 
@@ -44,12 +45,13 @@ The branch also centralizes a reusable public HTTP client and source-specific au
 
 ### Frontend exposure on PR #52
 
-The Board add picker currently exposes four real sources: `arxiv`, `wikipedia`, `qiita`, and `zenn`.
+The Board add picker now exposes five real sources: `arxiv`, `wikipedia`, `qiita`, `zenn`, and `youtube`.
 
+- arXiv: typed `query` + `maxResults` editor; automatic floor 24 h
 - Wikipedia: typed `language` + `maxResults` editor; automatic floor 6 h
 - Qiita: typed optional `query` + `maxResults` editor; automatic floor 1 h
 - Zenn: typed `trend` / `user` / `topic` selector, conditional user/topic value, and `maxResults`; automatic floor 1 h
-- arXiv remains the existing typed query source with automatic floor 24 h
+- YouTube: typed `channelId` + `maxResults` editor; automatic floor 1 h; newly added widgets open configuration immediately
 
 All exposed sources share the same core boundaries:
 
@@ -58,9 +60,11 @@ All exposed sources share the same core boundaries:
 - successful edits update the widget's in-memory state and content node, then rehydrate only the affected source identity; they do not rebuild the whole Board
 - Board feed rows use flex layout so thumbnail and no-thumbnail sources consume the row correctly
 
-YouTube remains backend-only and intentionally absent from the add picker. Do not expose it until the open YouTube authentication/quota decision is settled. `docs/DECISIONS.md` still explicitly lists that decision as open, and Issue #48 requires an explicit strategy before exposure.
+YouTube RSS accepts either a raw `UC...` channel ID or a `/channel/UC...` URL in the frontend; the frontend extracts only the safe channel ID before sending config to Rust. An empty newly created YouTube config is treated by the backend as a dormant source returning no rows, not a failed network refresh, so setup does not create pointless backoff state.
 
-The current YouTube backend uses selected-channel public RSS rather than the YouTube Data API. That design needs no API key and consumes no Data API quota, but this implementation fact is not itself permission to close the product decision. The user must decide whether public RSS + explicit channel ID is the intended final strategy or whether authenticated/subscription-based behavior is required.
+The YouTube auth/quota decision is no longer open. RSS is the baseline transport and requires no key. Optional YouTube Data API support will be added incrementally under Issue #53 with a user-supplied API key, beginning with high-value/low-frequency features such as `@handle` resolution, validation, metadata enrichment, and bounded recommendation-candidate discovery. OAuth/subscription-aware discovery is a later phase after the practical non-OAuth implementation. RSS must remain a fallback when API support is absent, invalid, unavailable, or quota-limited.
+
+Recommendation/ranking remains application-owned. Do not model this as an API for the user's current YouTube Home feed; use RSS/API to build candidates and the app's transparent ranking heuristics to choose what is shown.
 
 A previous PR #52 head failed all three OS CI jobs for one stale test: `commands::tests::source_validation_only_accepts_live_adapters` still expected YouTube to be unsupported. Commit `1dd692b` updates that regression test to accept the five live backend adapters and reject `nhk` / unknown kinds.
 
@@ -70,8 +74,10 @@ Frontend checkpoints:
 - `e57331e`: Board no-thumbnail row fix
 - `eba91dc`: Qiita typed frontend slice and shared arXiv/Qiita query editor
 - `cb74711`: Zenn typed frontend slice and shared per-widget refresh-section helper
+- `2391af4`: unconfigured YouTube source becomes dormant rather than a refresh failure
+- `1cec721`: YouTube RSS add/config/manual-refresh frontend slice, raw-ID + `/channel/UC...` URL normalization
 
-On `cb74711`, macOS passed the frontend production build before the documentation checkpoint and was running Rust tests. Because later documentation commits create newer PR heads, inspect the current head's workflows rather than treating any intermediate result as final merge evidence.
+The reconciled pre-YouTube head `e945e84` passed Linux, Windows, and macOS CI. The YouTube code head `1cec721` launched all three workflows; later documentation commits create newer heads, so inspect the current PR head and its workflows rather than treating the older green run as final merge evidence.
 
 Maintenance note: old stacked PR #39 was superseded by clean PR #41. Accidental duplicate Issues #29-#33 were created during tool setup and immediately closed as not planned.
 
@@ -170,9 +176,11 @@ Issue #35 established the source-editing boundary. Preserve these rules:
 - Board configuration UI is contextual and widget-local; opening or saving it must not rebuild the whole Board
 - after a successful edit, update the in-memory widget config and rehydrate only that widget from the new source identity; later `cache-changed` events continue the normal narrow update path
 
-`main` currently ships the arXiv editor (`query` + `maxResults`, 1..25). PR #52 adds typed editors for Wikipedia, Qiita, and Zenn using the same command boundary. Do not fall back to a generic JSON editor for YouTube; expose it only after the YouTube strategy decision and then use its real typed fields.
+`main` currently ships the arXiv editor (`query` + `maxResults`, 1..25). PR #52 adds typed editors for Wikipedia, Qiita, Zenn, and YouTube using the same command boundary. Do not fall back to generic JSON editors for source-specific user configuration.
 
-The arXiv and Qiita query-form path is shared because both expose `query` + bounded results, while source-specific default/query help and hard-refresh-floor messaging remain distinct. Per-widget refresh form construction is also shared across exposed sources; do not fork another copy unless the interaction genuinely differs.
+The arXiv and Qiita query-form path is shared because both expose `query` + bounded results, while source-specific default/query help and hard-refresh-floor messaging remain distinct. Per-widget refresh form construction is shared across all exposed source editors; do not fork another copy unless the interaction genuinely differs.
+
+YouTube has one additional UX rule: after adding a new YouTube widget, open its editor immediately because the RSS source needs a selected channel before it can produce content. The unconfigured backend source is intentionally dormant rather than an error during this setup window.
 
 ## Current source adapter policy
 
@@ -184,25 +192,23 @@ Current backend source kinds on PR #52:
 - `wikipedia`: default language `ja`, default 12 results, `maxResults` 1..25, language code 2..16 lowercase ASCII letters/hyphen, automatic floor 6 h
 - `qiita`: optional query (trimmed, <=512 characters), default 12 results, `maxResults` 1..25, automatic floor 1 h
 - `zenn`: `feedType` is `trend`, `user`, or `topic`; user/topic require a nonempty <=80-character safe slug using ASCII letters/numbers/`-`/`_`; default 12 results, `maxResults` 1..25; automatic floor 1 h
-- `youtube`: selected-channel public RSS; `channelId` may be stored empty but refresh requires a valid UC-prefixed identifier; default 12 results, `maxResults` 1..15; automatic floor 1 h; frontend exposure is blocked on the open auth/quota product decision
+- `youtube`: selected-channel public RSS; `channelId` may be stored empty during initial setup and then yields no rows until configured; nonempty IDs must be valid UC-prefixed identifiers; default 12 results, `maxResults` 1..15; automatic floor 1 h
 
 Do not duplicate adapter validation rules in the generic config canonicalizer. Frontend controls may provide friendly constraints, but the Rust adapter boundary remains authoritative.
 
-## YouTube decision gate
+## YouTube RSS / Data API / OAuth policy
 
-`docs/DECISIONS.md` currently lists `exact YouTube authentication/quota strategy before exposing that adapter` as an open question. Preserve that gate until explicitly resolved.
+The YouTube rollout is settled:
 
-The implemented backend option is deliberately low-friction:
+1. RSS is the baseline new-upload detector and no-key fallback.
+2. Users provide their own Data API key for optional API features. Never embed a shared project key in the desktop app.
+3. Add API features incrementally and selectively: `@handle` resolution, channel validation, useful visible/cached metadata, and bounded recommendation candidate discovery first.
+4. Do not create a parallel high-frequency API polling loop. Reuse the existing scheduler/cache/source identity boundaries and cache reusable resolution/metadata.
+5. API failure, invalid key, network error, or quota exhaustion must degrade back to RSS content where possible.
+6. OAuth is later work after the practical non-OAuth version. The target is guided few-click setup for subscription-aware discovery and other authenticated capabilities.
+7. Recommendation/ranking is application-owned. RSS/API collect candidates; freshness, already-shown penalty, click/channel preference, randomness, and later measured heuristics decide ranking.
 
-- URL: public YouTube channel Atom/RSS feed
-- selection: user supplies a channel ID
-- authentication: none
-- YouTube Data API quota: none
-- result cap: 15
-- thumbnail URL: derived from stable video ID
-- automatic refresh hard floor: 1 h
-
-If the user approves this as the final strategy, update `docs/DECISIONS.md` in the same batch that exposes YouTube. If the product requirement is instead authenticated subscriptions/channel discovery, redesign before exposure rather than silently treating RSS as equivalent.
+Issue #53 is the implementation tracker for the API-key/Data API/OAuth progression. It is not a merge gate for PR #52.
 
 ## Scheduler + runtime invariants
 
@@ -360,7 +366,7 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 1. Read `AGENTS.md`, `README.md`, this file, `docs/ACTIVE_WORK.md` when present, and `docs/DECISIONS.md`.
 2. Treat GitHub state as authoritative after an interrupted or overlapping stream. `main` is through PR #51; PR #52 on `real-source-adapters-clean` is the active product work until GitHub says otherwise.
 3. Inspect PR #52 head and all three CI workflows before changing code. Do not assume any intermediate green run is the final head.
-4. Wikipedia, Qiita, and Zenn are exposed with typed source editors. YouTube is the only backend adapter intentionally hidden from the add picker.
-5. Before any YouTube frontend work, resolve the `docs/DECISIONS.md` auth/quota open question. The implemented candidate strategy is public selected-channel RSS with no auth/Data API quota; do not silently assume it is approved.
-6. If public RSS is approved, record that decision, then expose YouTube with typed `channelId` + `maxResults` controls, manual refresh, existing refresh-policy UI, and narrow widget-only rehydration.
-7. Require Linux/Windows/macOS release-build CI green on the final merge candidate, reconcile `docs/ACTIVE_WORK.md` and PR #52, and perform available desktop smoke testing before merge.
+4. Wikipedia, Qiita, Zenn, and RSS-based YouTube are exposed with typed source editors on PR #52. YouTube addition opens its editor immediately; raw `UC...` IDs and `/channel/UC...` URLs are accepted, while richer `@handle` resolution belongs to #53.
+5. Preserve the settled YouTube rollout: RSS baseline/no-key fallback now, user-supplied Data API key incrementally under #53, guided OAuth later. Do not embed a shared key or create a parallel polling system.
+6. The next #52 gate is evidence, not more source implementation: final-head Linux/Windows/macOS release-build CI, available real desktop smoke testing, and final PR/docs reconciliation.
+7. Keep PR #52 draft until those merge gates are satisfied. Data API enrichment and OAuth are follow-up work and must not be pulled into #52 merely because the backend RSS slice is complete.

@@ -94,6 +94,27 @@ Never expose seeded fake placeholder content as if a source worked. The add pick
 
 NHK is removed from the product/source plan by user decision after real-use review. Do not reintroduce it unless that decision is explicitly changed.
 
+### YouTube integration strategy
+
+Use **public selected-channel RSS as the baseline transport**, then add YouTube Data API capabilities incrementally rather than replacing RSS.
+
+Current/near-term behavior:
+
+- selected-channel new-video monitoring uses public RSS and therefore remains usable without a Google API key
+- YouTube widgets are configured around a channel ID and bounded result count
+- channel-ID discovery must not be left unexplained: provide lightweight help immediately, and add handle/URL -> channel resolution when Data API support lands
+- automatic RSS refresh keeps the existing source floor and scheduler/cache boundaries; do not create a second polling architecture for API enrichment
+
+Data API rollout:
+
+- API use is optional and additive; RSS remains the fallback when no API key is configured, quota is exhausted, or the API is unavailable
+- each user supplies their own YouTube Data API key; never ship a shared project key in the desktop application
+- first API uses should be high-value/low-frequency operations such as resolving `@handle` to a channel ID, validating channels, enriching visible/cached video metadata, and selectively broadening recommendation candidates
+- avoid background API calls whose result is not currently visible or useful; API enrichment must preserve the lightweightness goal
+- recommendation/ranking remains application-owned. Do not assume the Data API exposes the user's current YouTube Home recommendation feed; build candidate sets from available public/API sources and rank them with the app's transparent heuristic layer
+- authenticated/private-account features are a later phase. After the practical non-OAuth version is complete, add an OAuth setup flow that reduces Google authorization to a few guided clicks and enables features such as subscription-aware discovery
+- credential storage, quota accounting, cache/refresh rules for API-derived data, and OAuth scopes must be designed explicitly before the corresponding phase ships
+
 ### Shortcut and settings
 
 Provide a configurable global shortcut. Initial/default binding: `CommandOrControl + Shift + Space`.
@@ -109,7 +130,8 @@ Optimization/deletion is part of the recurring development loop, not a final cle
 These are deliberately not frozen:
 
 - exact 1/2/3-item Compact visual geometry after more daily use
-- exact YouTube authentication/quota strategy before exposing that adapter
+- exact local storage mechanism for user-supplied API credentials before YouTube Data API support ships
+- exact recommendation candidate-generation mix once YouTube Data API support is available
 - cached-data retention/eviction policy
 - off-screen thumbnail preload depth
 - OS power-saver integration

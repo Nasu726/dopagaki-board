@@ -1,6 +1,8 @@
 # Roadmap
 
-Current checkpoint (2026-09-14): **functional MVP first-complete checkpoint reached.** The runnable shell, state loop, free-form Board, cache/scheduler, first real arXiv adapter, first simplification pass, and editable arXiv query/result-count UI are implemented on `main`. The next product checkpoint is real desktop validation and measurement, not automatic feature expansion. A reproducible performance procedure exists, but the actual numeric Idle CPU/RSS baseline is still pending and must not be reconstructed from CI or estimates.
+Current checkpoint (2026-09-15): **functional MVP is in real-use expansion.** The Tauri shell, four-state loop, responsive 12x8 Board, SQLite cache/scheduler, source-aware refresh policy, and first real source adapters are implemented. Windows real-use measurement has already established an initial acceptable Idle resident-cost baseline; keep measuring as functionality expands rather than treating performance as a one-time phase.
+
+PR #52 is the active real-source expansion. Wikipedia, Qiita, and Zenn frontend slices are implemented; the remaining source slice is selected-channel YouTube RSS. Optional YouTube Data API enrichment is tracked separately in #53.
 
 ## Phase 0 — durable specification
 
@@ -19,7 +21,7 @@ Figma comparison/mock work is intentionally deferred and is not required for the
 - [x] Add a minimal frontend -> Rust command proving the boundary.
 - [x] Start with no external feed/network dependency.
 - [x] Add reproducible baseline tooling and documentation.
-- [ ] Capture real release-build startup/RSS/Idle CPU numbers on a desktop session.
+- [x] Capture first real Windows release-build resident/Idle observation; see `docs/PERF_BASELINE.md`.
 - [x] Start the first explicit deletion/simplification pass (#28).
 
 Primary historical issue: #2. Performance measurement/refactor tracking: #6.
@@ -32,20 +34,23 @@ Primary historical issue: #2. Performance measurement/refactor tracking: #6.
 - [x] Implement configurable global shortcut.
 - [x] Implement Compact external launch -> automatic Idle collapse.
 - [x] Ensure opening Compact never waits for network.
-- [ ] Capture real Idle and transition timing measurements.
+- [ ] Continue real-device transition/startup measurement as behavior evolves.
 
 Primary historical issue: #3. Performance measurement: #6.
 
-## Phase 3 — free-form Board
+## Phase 3 — responsive Board
 
-- [x] Create free-position Board canvas.
-- [x] Add widgets.
-- [x] Drag widgets.
-- [x] Resize widgets.
-- [x] Persist geometry.
-- [x] Click empty space -> anchored add-widget picker.
-- [x] Keep layout free-form rather than forced grid packing.
-- [ ] Perform real-device interaction review across small, wide, and half-screen window sizes.
+The original free-pixel Board was replaced after real Windows use showed that accidental overlap/alignment friction outweighed the apparent freedom.
+
+- [x] Create Board canvas.
+- [x] Add widgets from an empty-space click.
+- [x] Replace free-pixel persistence with a responsive logical 12x8 grid.
+- [x] Drag widgets between grid positions.
+- [x] Resize from every edge/corner.
+- [x] Reject overlap without implicitly pushing neighboring widgets.
+- [x] Persist logical geometry at gesture end.
+- [x] Convert legacy pixel layouts once when loading.
+- [ ] Continue real-device interaction review across small, wide, and half-screen window sizes.
 
 Primary historical issue: #4.
 
@@ -60,22 +65,34 @@ Primary historical issue: #4.
 - [x] Keep Hidden/Idle UI work minimal while refresh continues.
 - [x] Canonicalize source identity and deduplicate equivalent source/config work.
 - [x] Use narrow cache-change UI updates rather than whole-Board rerenders.
+- [x] Add source defaults and per-widget inherit/OFF/custom refresh policy.
 
 Primary issue #5 is complete.
 
 ## Phase 5 — real adapters
 
-Suggested order:
+Current rollout:
 
 1. [x] arXiv — async Atom metadata adapter, source-specific 24 h automatic-refresh floor, serialized request gate.
    - [x] Editable query/result-count UI (#35 / PR #40).
-2. [ ] YouTube — groups/subscribed channels, thumbnails, recommendation heuristic, quota awareness.
-3. [ ] Wikipedia/Wikimedia — daily featured/on-this-day/random discovery.
-4. [ ] NHK.
-5. [ ] Qiita.
-6. [ ] Zenn.
+2. [x] Wikipedia/Wikimedia — public random discovery + PageImages thumbnails in draft PR #52.
+3. [x] Qiita — public items API + optional query in draft PR #52.
+4. [x] Zenn — public trend/user/topic RSS in draft PR #52.
+5. [ ] YouTube RSS — selected-channel public RSS, thumbnails, typed channel configuration, manual/source-aware refresh. Backend is implemented; frontend exposure is the remaining #52 slice.
+6. [ ] YouTube Data API enrichment — optional, user-supplied API key, RSS fallback; tracked by #53.
+7. [ ] YouTube OAuth/subscription-aware discovery — later update after the practical non-OAuth implementation is proven.
+
+NHK was removed from scope by product decision.
 
 Do not add adapters by cloning scheduler/cache infrastructure. Reuse the existing source boundary and add only source-specific policy/parsing.
+
+### YouTube rollout constraints
+
+- RSS is the baseline new-video transport and must remain usable with no Google credentials.
+- Never embed a shared Data API key. API-enabled users provide their own key.
+- Use Data API calls selectively for high-value operations such as `@handle`/channel resolution, channel validation, useful metadata enrichment, and bounded recommendation-candidate discovery.
+- API failure or quota exhaustion falls back to RSS where applicable.
+- OAuth is not required for the initial RSS or API-key phases. Later OAuth setup should be guided and require only a few user actions before enabling subscription-aware features.
 
 ## Phase 6 — media/preload
 
@@ -85,9 +102,11 @@ Do not add adapters by cloning scheduler/cache infrastructure. Reuse the existin
 - interrupt/yield preload when foreground work begins
 - avoid fetching optional metadata that current display mode does not use
 
-Do not begin aggressive preload work before the real resident-cost baseline is captured.
+Do not add aggressive preload just because more source metadata is available. Keep the measured lightweightness budget authoritative.
 
 ## Phase 7 — recommendation
+
+Recommendation/ranking is application-owned. Do not assume a supported YouTube Data API endpoint reproduces the user's current YouTube Home recommendations.
 
 Start with transparent heuristics, not ML:
 
@@ -96,6 +115,8 @@ Start with transparent heuristics, not ML:
 - click history
 - channel preference
 - randomness
+
+For YouTube, RSS/API/OAuth phases can progressively broaden the candidate pool, while this ranking layer remains separate. Cache and quota budgets bound how broadly candidates are collected.
 
 Tune only after real usage data exists.
 

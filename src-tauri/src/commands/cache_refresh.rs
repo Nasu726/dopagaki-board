@@ -2,9 +2,10 @@ use super::publish_shell_status;
 use crate::{
     app::{AppState, ShellStatus},
     db::{self, cache::CachedItem},
-    refresh_settings, runtime, sources,
+    refresh_policy, refresh_settings, runtime, sources,
 };
 use serde::Serialize;
+use std::collections::HashSet;
 use tauri::{AppHandle, State};
 
 const DEFAULT_CACHE_LIMIT: usize = 3;
@@ -14,6 +15,15 @@ const MAX_CACHE_LIMIT: usize = 100;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RefreshSettings {
     pub(crate) auto_interval_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SourceRefreshDefault {
+    pub(crate) source_kind: String,
+    pub(crate) mode: String,
+    pub(crate) auto_interval_seconds: Option<u64>,
+    pub(crate) effective_interval_seconds: Option<u64>,
 }
 
 #[tauri::command]
@@ -47,6 +57,62 @@ pub(crate) fn set_auto_refresh_interval(
 }
 
 #[tauri::command]
+pub(crate) fn get_source_refresh_defaults(
+    state: State<'_, AppState>,
+) -> Result<Vec<SourceRefreshDefault>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "database lock was poisoned".to_owned())?;
+    let global = refresh_settings::read(&connection)?;
+    sources::supported_kinds()
+        .iter()
+        .map(|source_kind| source_refresh_default(&connection, source_kind, global))
+        .collect()
+}
+
+#[tauri::command]
+pub(crate) fn set_source_refresh_default(
+    source_kind: String,
+    mode: String,
+    auto_interval_seconds: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<SourceRefreshDefault, String> {
+    if !sources::is_supported(&source_kind) {
+        return Err("source does not have a working adapter".to_owned());
+    }
+    let choice = refresh_policy::parse_choice(&mode, auto_interval_seconds)?;
+    let result = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
+        refresh_policy::write_source_choice(&connection, &source_kind, &choice)?;
+        let global = refresh_settings::read(&connection)?;
+        source_refresh_default(&connection, &source_kind, global)?
+    };
+    runtime::wake(&state);
+    Ok(result)
+}
+
+fn source_refresh_default(
+    connection: &rusqlite::Connection,
+    source_kind: &str,
+    global: Option<u64>,
+) -> Result<SourceRefreshDefault, String> {
+    let choice = refresh_policy::read_source_choice(connection, source_kind)?;
+    let (mode, auto_interval_seconds) = refresh_policy::choice_parts(&choice);
+    let configured = refresh_policy::read_source_default(connection, source_kind, global)?;
+    let effective_interval_seconds = sources::effective_auto_interval(source_kind, configured);
+    Ok(SourceRefreshDefault {
+        source_kind: source_kind.to_owned(),
+        mode: mode.to_owned(),
+        auto_interval_seconds,
+        effective_interval_seconds,
+    })
+}
+
+#[tauri::command]
 pub(crate) fn list_cached_items(
     limit: Option<usize>,
     state: State<'_, AppState>,
@@ -58,6 +124,69 @@ pub(crate) fn list_cached_items(
         .map_err(|_| "database lock was poisoned".to_owned())?;
     db::cache::list_top(&connection, limit)
         .map_err(|error| format!("failed to read cached items: {error}"))
+}
+
+#[tauri::command]
+pub(crate) fn list_compact_items(
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<CachedItem>, String> {
+    let limit = validate_cache_limit(limit.unwrap_or(DEFAULT_CACHE_LIMIT))?;
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "database lock was poisoned".to_owned())?;
+    let mut widgets = db::widgets::list(&connection)
+        .map_err(|error| format!("failed to list Compact widget sources: {error}"))?;
+
+    widgets.sort_by(|left, right| {
+        left.y
+            .total_cmp(&right.y)
+            .then_with(|| left.x.total_cmp(&right.x))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let mut visited_sources = HashSet::new();
+    let mut visited_items = HashSet::new();
+    let mut compact = Vec::with_capacity(limit);
+
+    for widget in widgets {
+        if compact.len() >= limit || !sources::is_supported(&widget.source_kind) {
+            continue;
+        }
+        let normalized =
+            match sources::normalize_config(&widget.source_kind, &widget.source_config_json) {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!(
+                        "ignoring invalid Compact {} source configuration: {error}",
+                        widget.source_kind
+                    );
+                    continue;
+                }
+            };
+        if !visited_sources.insert((widget.source_kind.clone(), normalized.clone())) {
+            continue;
+        }
+
+        let candidates = db::cache::list_for_source(
+            &connection,
+            &widget.source_kind,
+            &normalized,
+            limit - compact.len(),
+        )
+        .map_err(|error| format!("failed to read Compact source cache: {error}"))?;
+        for item in candidates {
+            if visited_items.insert(item.id.clone()) {
+                compact.push(item);
+                if compact.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(compact)
 }
 
 #[tauri::command]

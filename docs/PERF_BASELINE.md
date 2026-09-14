@@ -14,33 +14,33 @@ Current engineering budgets:
 - cached startup to usable UI: target around `<= 500 ms`; persistent `> 1 s` requires investigation
 - background work must not visibly stall drag, resize, scroll, shortcut handling, or clicks
 
-These are budgets, not claims that measurements already meet them.
+## First real Windows observation — 2026-09-14
 
-## Current baseline status
+The first external release-build Windows use was completed after the functional MVP checkpoint. It is the first real machine observation and replaces the previous `measurement pending` status, but it was reported as a practical-use check rather than a scripted 60 s settle + 300 s sampled benchmark. Preserve that distinction rather than inventing precision that was not recorded.
 
-Status: **real desktop measurement pending**.
+Reported observations:
 
-The repository added the release-build/process-tree measurement tooling before the first external adapter was merged, but an actual numeric pre-adapter desktop run was not captured in time. The arXiv adapter and event-driven refresh runtime are now on `main`.
-
-Do not fabricate a historical pre-adapter baseline from CI, dev mode, code inspection, or an inferred estimate. Record this as a process miss and establish the first real numeric baseline from the current release build instead.
-
-| Metric | Result | Conditions |
+| Metric | Result | Notes |
 | --- | --- | --- |
-| cached startup to usable UI | TBD | release build; cached/local state available |
-| idle CPU average | TBD | 5 min after 60 s settle; no interaction/work due |
-| idle CPU max/spikes | TBD | same run |
-| summed process-tree RSS | TBD | same run; includes attributable WebKit children |
-| process-tree PSS (Linux, if readable) | TBD | companion metric; shared-memory aware |
-| network while truly idle | TBD | no source refresh/preload due; should be 0 B/s |
-| Idle -> Compact latency | TBD | several repetitions, release build |
-| Board drag/resize under background refresh | TBD | release build; controlled refresh activity |
+| cached startup / usability | immediately usable | qualitative; no millisecond timing captured |
+| Idle memory | about **109 MB**, stable | Windows practical observation |
+| Idle CPU | **0%** displayed | no sustained background work observed |
+| Idle disk | **0 MB/s** displayed | no background disk churn observed |
+| Idle network | **0 Mbps** displayed | no idle traffic observed |
+| Board with five widgets | app process about **5.3 MB**, WebView2 Manager about **120.0 MB** | separate observation from the 109 MB Idle reading; do not sum or treat as the same sample |
+| state transitions | responsive / one-click | no visible transition stall |
+| widget drag/resize | no visible stutter | real interaction feedback |
+
+The memory observations are within the initial `<= 150 MiB` resident budget at the level visible in Task Manager. CPU/network behavior also matches the intended idle behavior. Because the user did not record an exact sampling duration, process-tree definition, Windows version, or hardware in that report, do not treat these values as a laboratory-quality regression series. They are strong evidence that the architecture is in the correct range and that product correctness/UX should currently take priority over speculative optimization.
+
+The pre-adapter numeric baseline was never captured. Do not reconstruct one from CI, code inspection, or estimates.
 
 ## Canonical Linux idle measurement
 
 Use a **release build**, not `tauri dev`. Dev servers, debug builds, hot reload, and development logging are not representative resident costs.
 
 ```bash
-npm install
+npm ci
 npm run tauri build
 
 ./src-tauri/target/release/dopagaki-board &
@@ -84,9 +84,9 @@ A subprocess that starts and exits entirely between two `/proc` samples can be m
 
 `scripts/measure_idle_linux.py` deliberately does **not** report per-process network bytes. `/proc/<pid>/net/dev` describes the process's network namespace rather than traffic attributable to that PID; treating it as per-process traffic would produce false measurements.
 
-Verify app-attributable traffic separately with an OS tool that can attribute network activity to processes (for example `nethogs` if already installed) or a suitable system monitor. Record the tool and observation below. Do not add a permanent runtime dependency merely to measure this.
+Verify app-attributable traffic separately with an OS tool that can attribute network activity to processes (for example `nethogs` if already installed) or a suitable system monitor. Record the tool and observation. Do not add a permanent runtime dependency merely to measure this.
 
-A valid "truly idle" network run must have no due refresh. With the current arXiv adapter, that means no active arXiv source is due/running during the sample. Network activity caused by an intentionally due refresh is background-work cost, not an idle-network regression.
+A valid "truly idle" network run must have no due refresh. Network activity caused by an intentionally due refresh is background-work cost, not an idle-network regression.
 
 ## Interaction-under-refresh check
 
@@ -102,9 +102,7 @@ For a controlled release-build check:
 
 This is initially a qualitative check. Add timing instrumentation only if real use suggests a regression; do not introduce a permanent benchmark framework pre-emptively.
 
-## Conditions to record with every baseline
-
-Record enough context that later measurements can be compared meaningfully:
+## Conditions to record with every canonical baseline
 
 ```text
 commit:
@@ -125,11 +123,9 @@ network measurement tool:
 notes:
 ```
 
-Useful Linux commands include `uname -a`, `echo "$XDG_SESSION_TYPE"`, `lscpu`, and `free -h`.
+Do not compare numbers collected under materially different build modes, active refresh state, or measurement definitions as if they were one regression series.
 
-Do not compare numbers collected under materially different build modes, active refresh state, or measurement definitions as if they were a regression series.
-
-## Windows and macOS
+## Windows and macOS canonical runs
 
 The same conceptual rules apply even when the Linux helper cannot be used:
 
@@ -141,7 +137,7 @@ The same conceptual rules apply even when the Linux helper cannot be used:
 - verify idle network separately
 - ensure no source refresh is due/running during the idle sample
 
-Use Task Manager / Resource Monitor or equivalent tooling on Windows and Activity Monitor or equivalent tooling on macOS. If we later automate those platforms, preserve the same metric definitions rather than inventing incompatible ones.
+Use Task Manager / Resource Monitor or equivalent tooling on Windows and Activity Monitor or equivalent tooling on macOS. If these platforms are later automated, preserve the same metric definitions rather than inventing incompatible ones.
 
 ## Regression rule
 

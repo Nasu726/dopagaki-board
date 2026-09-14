@@ -15,6 +15,7 @@ pub(crate) enum ViewState {
 pub(crate) enum ViewEvent {
     GlobalToggle,
     ClickIdleOrb,
+    OpenCompact,
     OpenBoard,
     Hide,
     ExternalLaunch,
@@ -31,6 +32,7 @@ impl ViewState {
                 Self::Idle => Self::Compact,
                 other => other,
             },
+            ViewEvent::OpenCompact => Self::Compact,
             ViewEvent::OpenBoard => Self::Board,
             ViewEvent::Hide => Self::Hidden,
             ViewEvent::ExternalLaunch => match self {
@@ -66,6 +68,18 @@ mod tests {
         assert_eq!(
             ViewState::Board.transition(ViewEvent::GlobalToggle),
             ViewState::Idle
+        );
+    }
+
+    #[test]
+    fn explicit_restore_and_maximize_choose_compact_or_board() {
+        assert_eq!(
+            ViewState::Board.transition(ViewEvent::OpenCompact),
+            ViewState::Compact
+        );
+        assert_eq!(
+            ViewState::Compact.transition(ViewEvent::OpenBoard),
+            ViewState::Board
         );
     }
 

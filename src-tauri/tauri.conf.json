@@ -19,7 +19,9 @@
         "minWidth": 40,
         "minHeight": 40,
         "resizable": false,
-        "decorations": false
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true
       }
     ],
     "security": {

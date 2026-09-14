@@ -3,19 +3,17 @@ pub(crate) mod cache_refresh;
 use crate::{
     app::{self, AppState, ShellStatus, ViewEvent, ViewState, GLOBAL_SHORTCUT_SETTING_KEY},
     db::{self, widgets::WidgetLayout},
-    runtime, sources,
+    refresh_policy, runtime, sources,
 };
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
 
-const MIN_WIDGET_WIDTH: f64 = 140.0;
-const MIN_WIDGET_HEIGHT: f64 = 96.0;
-const MAX_WIDGET_SIZE: f64 = 4096.0;
-const MAX_WIDGET_POSITION: f64 = 65_536.0;
+const GRID_COLUMNS: f64 = 12.0;
+const GRID_ROWS: f64 = 8.0;
+const MIN_WIDGET_GRID_SIZE: f64 = 1.0;
 const MAX_SHORTCUT_LENGTH: usize = 128;
 const SHELL_STATUS_CHANGED_EVENT: &str = "shell-status-changed";
-const SOURCE_KINDS: &[&str] = &["youtube", "arxiv", "wikipedia", "nhk", "qiita", "zenn"];
 
 #[tauri::command]
 pub(crate) fn get_view_state(app: AppHandle) -> Result<ViewState, String> {
@@ -135,14 +133,14 @@ pub(crate) fn add_widget(
     state: State<'_, AppState>,
 ) -> Result<WidgetLayout, String> {
     validate_source_kind(&source_kind)?;
-    validate_position(x, y)?;
-    validate_size(width, height)?;
+    validate_grid_geometry(x, y, width, height)?;
 
     let widget = {
         let connection = state
             .db
             .lock()
             .map_err(|_| "database lock was poisoned".to_owned())?;
+        reject_overlap(&connection, None, x, y, width, height)?;
         db::widgets::create(&connection, &source_kind, x, y, width, height)
             .map_err(|error| format!("failed to create widget: {error}"))?
     };
@@ -184,6 +182,38 @@ pub(crate) fn update_widget_source_config(
 }
 
 #[tauri::command]
+pub(crate) fn update_widget_refresh_config(
+    id: i64,
+    refresh_config_json: String,
+    state: State<'_, AppState>,
+) -> Result<WidgetLayout, String> {
+    if id <= 0 {
+        return Err("widget id must be positive".to_owned());
+    }
+    let normalized = refresh_policy::normalize_widget_config(&refresh_config_json)?;
+
+    let updated = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
+        let mut widget = db::widgets::get(&connection, id)
+            .map_err(|error| format!("failed to read widget: {error}"))?
+            .ok_or_else(|| "widget was not found".to_owned())?;
+        let found = db::widgets::update_refresh_config(&connection, id, &normalized)
+            .map_err(|error| format!("failed to update widget refresh configuration: {error}"))?;
+        if !found {
+            return Err("widget was not found".to_owned());
+        }
+        widget.refresh_config_json = normalized;
+        widget
+    };
+
+    runtime::wake(&state);
+    Ok(updated)
+}
+
+#[tauri::command]
 pub(crate) fn update_widget_geometry(
     id: i64,
     x: f64,
@@ -195,13 +225,13 @@ pub(crate) fn update_widget_geometry(
     if id <= 0 {
         return Err("widget id must be positive".to_owned());
     }
-    validate_position(x, y)?;
-    validate_size(width, height)?;
+    validate_grid_geometry(x, y, width, height)?;
 
     let connection = state
         .db
         .lock()
         .map_err(|_| "database lock was poisoned".to_owned())?;
+    reject_overlap(&connection, Some(id), x, y, width, height)?;
     let found = db::widgets::update_geometry(&connection, id, x, y, width, height)
         .map_err(|error| format!("failed to update widget geometry: {error}"))?;
     if !found {
@@ -285,34 +315,59 @@ fn normalize_shortcut(shortcut: &str) -> Result<String, String> {
 }
 
 fn validate_source_kind(source_kind: &str) -> Result<(), String> {
-    if SOURCE_KINDS.contains(&source_kind) {
+    if sources::is_supported(source_kind) {
         Ok(())
     } else {
-        Err("unsupported widget source".to_owned())
+        Err("this source does not have a working adapter yet".to_owned())
     }
 }
 
-fn validate_position(x: f64, y: f64) -> Result<(), String> {
-    let valid = x.is_finite()
-        && y.is_finite()
-        && (0.0..=MAX_WIDGET_POSITION).contains(&x)
-        && (0.0..=MAX_WIDGET_POSITION).contains(&y);
+fn is_grid_integer(value: f64) -> bool {
+    value.is_finite() && value.fract().abs() < f64::EPSILON
+}
+
+fn validate_grid_geometry(x: f64, y: f64, width: f64, height: f64) -> Result<(), String> {
+    let valid = [x, y, width, height].into_iter().all(is_grid_integer)
+        && x >= 0.0
+        && y >= 0.0
+        && width >= MIN_WIDGET_GRID_SIZE
+        && height >= MIN_WIDGET_GRID_SIZE
+        && x + width <= GRID_COLUMNS
+        && y + height <= GRID_ROWS;
     if valid {
         Ok(())
     } else {
-        Err("widget position is outside the supported range".to_owned())
+        Err("widget geometry must be an integer rectangle inside the 12x8 Board grid".to_owned())
     }
 }
 
-fn validate_size(width: f64, height: f64) -> Result<(), String> {
-    let valid = width.is_finite()
-        && height.is_finite()
-        && (MIN_WIDGET_WIDTH..=MAX_WIDGET_SIZE).contains(&width)
-        && (MIN_WIDGET_HEIGHT..=MAX_WIDGET_SIZE).contains(&height);
-    if valid {
-        Ok(())
+fn rectangles_overlap(first: (f64, f64, f64, f64), second: (f64, f64, f64, f64)) -> bool {
+    let (ax, ay, aw, ah) = first;
+    let (bx, by, bw, bh) = second;
+    ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
+}
+
+fn reject_overlap(
+    connection: &rusqlite::Connection,
+    excluded_id: Option<i64>,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let widgets = db::widgets::list(connection)
+        .map_err(|error| format!("failed to validate Board geometry: {error}"))?;
+    if widgets.iter().any(|widget| {
+        Some(widget.id) != excluded_id
+            && validate_grid_geometry(widget.x, widget.y, widget.width, widget.height).is_ok()
+            && rectangles_overlap(
+                (x, y, width, height),
+                (widget.x, widget.y, widget.width, widget.height),
+            )
+    }) {
+        Err("widget geometry overlaps another widget".to_owned())
     } else {
-        Err("widget size is outside the supported range".to_owned())
+        Ok(())
     }
 }
 
@@ -331,19 +386,31 @@ mod tests {
     }
 
     #[test]
-    fn source_validation_is_explicit() {
-        assert!(validate_source_kind("youtube").is_ok());
-        assert!(validate_source_kind("unknown").is_err());
+    fn source_validation_only_accepts_live_adapters() {
+        assert!(validate_source_kind("arxiv").is_ok());
+        assert!(validate_source_kind("youtube").is_err());
+        assert!(validate_source_kind("nhk").is_err());
     }
 
     #[test]
-    fn geometry_validation_rejects_invalid_values() {
-        assert!(validate_position(0.0, 0.0).is_ok());
-        assert!(validate_position(-1.0, 0.0).is_err());
-        assert!(validate_position(MAX_WIDGET_POSITION + 1.0, 0.0).is_err());
-        assert!(validate_position(f64::NAN, 0.0).is_err());
-        assert!(validate_size(280.0, 180.0).is_ok());
-        assert!(validate_size(80.0, 180.0).is_err());
-        assert!(validate_size(f64::INFINITY, 180.0).is_err());
+    fn grid_geometry_is_integer_and_bounded() {
+        assert!(validate_grid_geometry(0.0, 0.0, 4.0, 3.0).is_ok());
+        assert!(validate_grid_geometry(11.0, 7.0, 1.0, 1.0).is_ok());
+        assert!(validate_grid_geometry(-1.0, 0.0, 4.0, 3.0).is_err());
+        assert!(validate_grid_geometry(0.5, 0.0, 4.0, 3.0).is_err());
+        assert!(validate_grid_geometry(10.0, 0.0, 3.0, 2.0).is_err());
+        assert!(validate_grid_geometry(0.0, 0.0, 0.0, 2.0).is_err());
+    }
+
+    #[test]
+    fn touching_rectangles_do_not_overlap_but_intersections_do() {
+        assert!(!rectangles_overlap(
+            (0.0, 0.0, 2.0, 2.0),
+            (2.0, 0.0, 2.0, 2.0)
+        ));
+        assert!(rectangles_overlap(
+            (0.0, 0.0, 2.0, 2.0),
+            (1.0, 1.0, 2.0, 2.0)
+        ));
     }
 }

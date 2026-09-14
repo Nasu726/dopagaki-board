@@ -102,6 +102,9 @@ Current/near-term behavior:
 
 - selected-channel new-video monitoring uses public RSS and therefore remains usable without a Google API key
 - YouTube widgets are configured around a channel ID and bounded result count
+- adding a YouTube widget immediately opens its source configuration because a channel is required before useful RSS content exists
+- cancelling that first configuration **keeps the newly created widget**. Creating the widget is treated as intent to configure it; keeping the empty/dormant widget avoids forcing the user to recreate it and allows immediate retry from the widget settings
+- an unconfigured YouTube widget remains dormant rather than being treated as a failed network refresh/backoff condition
 - channel-ID discovery must not be left unexplained: provide lightweight help immediately, and add handle/URL -> channel resolution when Data API support lands
 - automatic RSS refresh keeps the existing source floor and scheduler/cache boundaries; do not create a second polling architecture for API enrichment
 

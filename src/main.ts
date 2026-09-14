@@ -64,6 +64,20 @@ type RefreshSettings = {
   autoIntervalSeconds: number | null;
 };
 
+type RefreshMode = "inherit" | "off" | "interval";
+
+type SourceRefreshDefault = {
+  sourceKind: string;
+  mode: RefreshMode;
+  autoIntervalSeconds: number | null;
+  effectiveIntervalSeconds: number | null;
+};
+
+type WidgetRefreshConfig = {
+  mode: RefreshMode;
+  autoIntervalSeconds: number | null;
+};
+
 type CacheChanged = {
   sourceKind: string;
   sourceConfigJson: string;
@@ -98,6 +112,7 @@ const BOARD_CACHE_LIMIT = 25;
 const REFRESH_SLIDER_MAX = 100;
 const MIN_AUTO_REFRESH_SECONDS = 5 * 60;
 const MAX_AUTO_REFRESH_SECONDS = 24 * 60 * 60;
+const DEFAULT_AUTO_REFRESH_SECONDS = 60 * 60;
 const DEFAULT_ARXIV_QUERY = "cat:cs.AI";
 const DEFAULT_ARXIV_MAX_RESULTS = 12;
 
@@ -124,6 +139,8 @@ let settingsOpen = false;
 let shortcutFormError: string | null = null;
 let refreshSettings: RefreshSettings | null = null;
 let refreshFormError: string | null = null;
+let sourceRefreshDefaults: SourceRefreshDefault[] | null = null;
+let sourceRefreshFormError: string | null = null;
 
 function render(): void {
   document.documentElement.dataset.view = currentView;
@@ -336,6 +353,7 @@ function renderBoard(): void {
     settingsOpen = !settingsOpen;
     shortcutFormError = null;
     refreshFormError = null;
+    sourceRefreshFormError = null;
     addPoint = null;
     renderBoard();
   });
@@ -559,13 +577,19 @@ function renderSettingsMarkup(): string {
         </div>
       </form>
       <section class="settings-section" aria-label="Automatic refresh">
-        <label for="refresh-interval">Default automatic refresh</label>
+        <label for="refresh-interval">Global automatic refresh fallback</label>
         <div class="settings-range-row">
           <input id="refresh-interval" type="range" min="0" max="${REFRESH_SLIDER_MAX}" step="1">
           <output id="refresh-interval-output" for="refresh-interval">Loading…</output>
         </div>
-        <p>Left edge is OFF. Source-specific safety limits still apply.</p>
+        <p>Left edge is OFF. Source defaults may inherit or override this fallback.</p>
         <p id="refresh-error" class="settings-error" hidden></p>
+      </section>
+      <section class="settings-section" aria-label="Source refresh defaults">
+        <label>Source defaults</label>
+        <div id="source-refresh-defaults" class="settings-source-list" aria-live="polite">Loading…</div>
+        <p>Each widget can inherit its source default, turn automatic refresh off, or choose a custom interval. Hard source limits still apply.</p>
+        <p id="source-refresh-error" class="settings-error" hidden></p>
       </section>
     </aside>
   `;
@@ -580,6 +604,7 @@ function bindSettings(): void {
     settingsOpen = false;
     shortcutFormError = null;
     refreshFormError = null;
+    sourceRefreshFormError = null;
     renderBoard();
   });
 
@@ -598,25 +623,25 @@ function bindSettings(): void {
   const slider = document.querySelector<HTMLInputElement>("#refresh-interval");
   const output = document.querySelector<HTMLOutputElement>("#refresh-interval-output");
   const refreshError = document.querySelector<HTMLElement>("#refresh-error");
-  if (!slider || !output || !refreshError) {
-    return;
+  if (slider && output && refreshError) {
+    slider.addEventListener("input", () => {
+      output.value = formatRefreshInterval(sliderPositionToSeconds(Number(slider.value)));
+    });
+    slider.addEventListener("change", () => {
+      void saveAutoRefreshInterval(Number(slider.value), slider, output, refreshError);
+    });
+
+    if (refreshSettings) {
+      setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
+      showSettingsError(refreshError, refreshFormError);
+    } else {
+      slider.disabled = true;
+      output.value = "Loading…";
+      void loadRefreshSettings(slider, output, refreshError);
+    }
   }
 
-  slider.addEventListener("input", () => {
-    output.value = formatRefreshInterval(sliderPositionToSeconds(Number(slider.value)));
-  });
-  slider.addEventListener("change", () => {
-    void saveAutoRefreshInterval(Number(slider.value), slider, output, refreshError);
-  });
-
-  if (refreshSettings) {
-    setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
-    showSettingsError(refreshError, refreshFormError);
-  } else {
-    slider.disabled = true;
-    output.value = "Loading…";
-    void loadRefreshSettings(slider, output, refreshError);
-  }
+  bindSourceRefreshDefaults();
 }
 
 async function loadRefreshSettings(
@@ -657,8 +682,10 @@ async function saveAutoRefreshInterval(
     refreshSettings = await invoke<RefreshSettings>("set_auto_refresh_interval", {
       autoIntervalSeconds,
     });
+    sourceRefreshDefaults = null;
     if (settingsOpen && slider.isConnected) {
       setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
+      bindSourceRefreshDefaults();
     }
   } catch (error) {
     refreshFormError = getErrorMessage(error);
@@ -674,6 +701,172 @@ async function saveAutoRefreshInterval(
       slider.disabled = false;
     }
   }
+}
+
+function bindSourceRefreshDefaults(): void {
+  const container = document.querySelector<HTMLElement>("#source-refresh-defaults");
+  const errorElement = document.querySelector<HTMLElement>("#source-refresh-error");
+  if (!settingsOpen || !container || !errorElement) {
+    return;
+  }
+
+  showSettingsError(errorElement, sourceRefreshFormError);
+  if (sourceRefreshDefaults) {
+    renderSourceRefreshDefaults(container, sourceRefreshDefaults);
+    return;
+  }
+
+  container.textContent = "Loading…";
+  void loadSourceRefreshDefaults(container, errorElement);
+}
+
+async function loadSourceRefreshDefaults(
+  container: HTMLElement,
+  errorElement: HTMLElement,
+): Promise<void> {
+  try {
+    sourceRefreshDefaults = await invoke<SourceRefreshDefault[]>("get_source_refresh_defaults");
+    sourceRefreshFormError = null;
+    if (!settingsOpen || !container.isConnected) {
+      return;
+    }
+    renderSourceRefreshDefaults(container, sourceRefreshDefaults);
+    showSettingsError(errorElement, null);
+  } catch (error) {
+    sourceRefreshFormError = getErrorMessage(error);
+    if (settingsOpen && container.isConnected) {
+      container.textContent = "Unavailable";
+      showSettingsError(errorElement, sourceRefreshFormError);
+    }
+    console.error("failed to load source refresh defaults", error);
+  }
+}
+
+function renderSourceRefreshDefaults(
+  container: HTMLElement,
+  defaults: SourceRefreshDefault[],
+): void {
+  container.replaceChildren();
+  if (defaults.length === 0) {
+    container.textContent = "No active source adapters.";
+    return;
+  }
+
+  for (const source of defaults) {
+    const row = document.createElement("div");
+    row.className = "settings-source-row";
+
+    const heading = document.createElement("div");
+    heading.className = "settings-source-row__heading";
+    const label = document.createElement("strong");
+    label.textContent = sourceLabel(source.sourceKind);
+    const effective = document.createElement("span");
+    effective.textContent = `effective ${formatRefreshInterval(source.effectiveIntervalSeconds)}`;
+    heading.append(label, effective);
+
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", `${sourceLabel(source.sourceKind)} refresh default`);
+    select.append(
+      refreshModeOption("inherit", "Inherit global"),
+      refreshModeOption("off", "OFF"),
+      refreshModeOption("interval", "Custom"),
+    );
+    select.value = source.mode;
+
+    const rangeRow = document.createElement("div");
+    rangeRow.className = "settings-range-row settings-source-row__range";
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = "1";
+    slider.max = String(REFRESH_SLIDER_MAX);
+    slider.step = "1";
+    const startingSeconds =
+      source.autoIntervalSeconds ?? refreshSettings?.autoIntervalSeconds ?? DEFAULT_AUTO_REFRESH_SECONDS;
+    slider.value = String(Math.max(1, secondsToSliderPosition(startingSeconds)));
+    const output = document.createElement("output");
+    output.value = formatRefreshInterval(startingSeconds);
+    rangeRow.append(slider, output);
+
+    const syncVisibility = (): void => {
+      rangeRow.hidden = select.value !== "interval";
+    };
+    syncVisibility();
+
+    slider.addEventListener("input", () => {
+      output.value = formatRefreshInterval(sliderPositionToSeconds(Number(slider.value)));
+    });
+    select.addEventListener("change", () => {
+      syncVisibility();
+      const mode = select.value as RefreshMode;
+      const seconds =
+        mode === "interval" ? sliderPositionToSeconds(Number(slider.value)) : null;
+      void saveSourceRefreshDefault(source.sourceKind, mode, seconds, select, slider);
+    });
+    slider.addEventListener("change", () => {
+      if (select.value === "interval") {
+        void saveSourceRefreshDefault(
+          source.sourceKind,
+          "interval",
+          sliderPositionToSeconds(Number(slider.value)),
+          select,
+          slider,
+        );
+      }
+    });
+
+    row.append(heading, select, rangeRow);
+    container.append(row);
+  }
+}
+
+async function saveSourceRefreshDefault(
+  sourceKind: string,
+  mode: RefreshMode,
+  autoIntervalSeconds: number | null,
+  select: HTMLSelectElement,
+  slider: HTMLInputElement,
+): Promise<void> {
+  const errorElement = document.querySelector<HTMLElement>("#source-refresh-error");
+  select.disabled = true;
+  slider.disabled = true;
+  sourceRefreshFormError = null;
+  if (errorElement) {
+    showSettingsError(errorElement, null);
+  }
+
+  try {
+    const updated = await invoke<SourceRefreshDefault>("set_source_refresh_default", {
+      sourceKind,
+      mode,
+      autoIntervalSeconds,
+    });
+    const current = sourceRefreshDefaults ?? [];
+    sourceRefreshDefaults = current.map((item) =>
+      item.sourceKind === updated.sourceKind ? updated : item,
+    );
+    const container = document.querySelector<HTMLElement>("#source-refresh-defaults");
+    if (settingsOpen && container) {
+      renderSourceRefreshDefaults(container, sourceRefreshDefaults);
+    }
+  } catch (error) {
+    sourceRefreshFormError = getErrorMessage(error);
+    if (errorElement?.isConnected) {
+      showSettingsError(errorElement, sourceRefreshFormError);
+    }
+    console.error(`failed to save ${sourceKind} refresh default`, error);
+  } finally {
+    if (select.isConnected) {
+      select.disabled = false;
+      slider.disabled = false;
+    }
+  }
+}
+
+function refreshModeOption(value: RefreshMode, label: string): HTMLOptionElement {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
 }
 
 function setRefreshControls(
@@ -741,6 +934,7 @@ function handleBoardPointerDown(event: PointerEvent): void {
   settingsOpen = false;
   shortcutFormError = null;
   refreshFormError = null;
+  sourceRefreshFormError = null;
   renderBoard();
 }
 
@@ -795,21 +989,22 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
   }
 
   const config = readArxivConfig(widget.sourceConfigJson);
+  const refreshConfig = readWidgetRefreshConfig(widget.refreshConfigJson);
   const form = document.createElement("form");
   form.className = "board-widget-config";
   form.dataset.widgetConfigEditor = "";
-  form.setAttribute("aria-label", "arXiv source settings");
+  form.setAttribute("aria-label", "arXiv widget settings");
   form.addEventListener("pointerdown", (event) => event.stopPropagation());
   form.addEventListener("click", (event) => event.stopPropagation());
 
   const header = document.createElement("div");
   header.className = "board-widget-config__header";
   const title = document.createElement("strong");
-  title.textContent = "arXiv source";
+  title.textContent = "arXiv widget";
   const close = document.createElement("button");
   close.type = "button";
   close.className = "board-widget-config__close";
-  close.setAttribute("aria-label", "Close source settings");
+  close.setAttribute("aria-label", "Close widget settings");
   close.textContent = "×";
   header.append(title, close);
 
@@ -842,6 +1037,52 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
   help.className = "board-widget-config__help";
   help.textContent = 'Example: cat:cs.AI · ti:"graph neural network"';
 
+  const refreshSection = document.createElement("div");
+  refreshSection.className = "board-widget-config__refresh";
+  const refreshLabel = document.createElement("label");
+  refreshLabel.className = "board-widget-config__field";
+  const refreshCaption = document.createElement("span");
+  refreshCaption.textContent = "Automatic refresh";
+  const refreshSelect = document.createElement("select");
+  refreshSelect.append(
+    refreshModeOption("inherit", "Inherit source default"),
+    refreshModeOption("off", "OFF"),
+    refreshModeOption("interval", "Custom interval"),
+  );
+  refreshSelect.value = refreshConfig.mode;
+  refreshLabel.append(refreshCaption, refreshSelect);
+
+  const refreshRange = document.createElement("div");
+  refreshRange.className = "board-widget-config__range";
+  const refreshSlider = document.createElement("input");
+  refreshSlider.type = "range";
+  refreshSlider.min = "1";
+  refreshSlider.max = String(REFRESH_SLIDER_MAX);
+  refreshSlider.step = "1";
+  const refreshSeconds = refreshConfig.autoIntervalSeconds ?? DEFAULT_AUTO_REFRESH_SECONDS;
+  refreshSlider.value = String(Math.max(1, secondsToSliderPosition(refreshSeconds)));
+  const refreshOutput = document.createElement("output");
+  refreshOutput.value = formatRefreshInterval(refreshSeconds);
+  refreshRange.append(refreshSlider, refreshOutput);
+
+  const refreshHelp = document.createElement("p");
+  refreshHelp.className = "board-widget-config__help";
+  refreshHelp.textContent = "arXiv automatic refresh is always clamped to at least 24 h. Manual refresh still works while auto is OFF.";
+  refreshSection.append(refreshLabel, refreshRange, refreshHelp);
+
+  const syncRefreshControls = (): void => {
+    const custom = refreshSelect.value === "interval";
+    refreshRange.hidden = !custom;
+    refreshSlider.disabled = !custom;
+  };
+  syncRefreshControls();
+  refreshSelect.addEventListener("change", syncRefreshControls);
+  refreshSlider.addEventListener("input", () => {
+    refreshOutput.value = formatRefreshInterval(
+      sliderPositionToSeconds(Number(refreshSlider.value)),
+    );
+  });
+
   const errorElement = document.createElement("p");
   errorElement.className = "board-widget-config__error";
   errorElement.setAttribute("role", "status");
@@ -868,18 +1109,28 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    void saveWidgetSourceConfig(
+    void saveWidgetSettings(
       id,
       element,
       form,
       queryInput,
       countInput,
+      refreshSelect,
+      refreshSlider,
       errorElement,
       submit,
     );
   });
 
-  form.append(header, queryLabel, countLabel, help, errorElement, actions);
+  form.append(
+    header,
+    queryLabel,
+    countLabel,
+    help,
+    refreshSection,
+    errorElement,
+    actions,
+  );
   element.append(form);
   queryInput.focus();
   queryInput.select();
@@ -903,12 +1154,51 @@ function readArxivConfig(sourceConfigJson: string): ArxivSourceConfig {
   }
 }
 
-async function saveWidgetSourceConfig(
+function readWidgetRefreshConfig(refreshConfigJson: string): WidgetRefreshConfig {
+  try {
+    const parsed = JSON.parse(refreshConfigJson) as {
+      mode?: unknown;
+      autoIntervalSeconds?: unknown;
+    };
+    if (parsed.mode === "off") {
+      return { mode: "off", autoIntervalSeconds: null };
+    }
+    if (
+      parsed.mode === "interval" &&
+      typeof parsed.autoIntervalSeconds === "number" &&
+      Number.isFinite(parsed.autoIntervalSeconds)
+    ) {
+      return { mode: "interval", autoIntervalSeconds: parsed.autoIntervalSeconds };
+    }
+  } catch {
+    // Invalid persisted data is treated as inherit in the presentation layer;
+    // the Rust policy boundary remains authoritative when saving.
+  }
+  return { mode: "inherit", autoIntervalSeconds: null };
+}
+
+function widgetRefreshConfigJson(
+  mode: RefreshMode,
+  sliderPosition: number,
+): string {
+  if (mode === "inherit") {
+    return "{}";
+  }
+  if (mode === "off") {
+    return JSON.stringify({ mode: "off" });
+  }
+  const autoIntervalSeconds = sliderPositionToSeconds(sliderPosition) ?? MIN_AUTO_REFRESH_SECONDS;
+  return JSON.stringify({ mode: "interval", autoIntervalSeconds });
+}
+
+async function saveWidgetSettings(
   id: number,
   element: HTMLElement,
   form: HTMLFormElement,
   queryInput: HTMLInputElement,
   countInput: HTMLInputElement,
+  refreshSelect: HTMLSelectElement,
+  refreshSlider: HTMLInputElement,
   errorElement: HTMLElement,
   submitButton: HTMLButtonElement,
 ): Promise<void> {
@@ -917,15 +1207,27 @@ async function saveWidgetSourceConfig(
   submitButton.disabled = true;
   queryInput.disabled = true;
   countInput.disabled = true;
+  refreshSelect.disabled = true;
+  refreshSlider.disabled = true;
   form.setAttribute("aria-busy", "true");
 
+  let sourceSaved = false;
   try {
-    const updated = await invoke<WidgetLayout>("update_widget_source_config", {
+    await invoke<WidgetLayout>("update_widget_source_config", {
       id,
       sourceConfigJson: JSON.stringify({
         query: queryInput.value.trim(),
         maxResults: Number(countInput.value),
       }),
+    });
+    sourceSaved = true;
+
+    const updated = await invoke<WidgetLayout>("update_widget_refresh_config", {
+      id,
+      refreshConfigJson: widgetRefreshConfigJson(
+        refreshSelect.value as RefreshMode,
+        Number(refreshSlider.value),
+      ),
     });
 
     const index = boardWidgets.findIndex((widget) => widget.id === id);
@@ -948,16 +1250,22 @@ async function saveWidgetSourceConfig(
       boardHydrationGeneration,
     );
   } catch (error) {
+    if (sourceSaved) {
+      boardLoaded = false;
+      await loadBoardWidgets();
+    }
     if (form.isConnected) {
       errorElement.textContent = getErrorMessage(error);
       errorElement.hidden = false;
     }
-    console.error("failed to save widget source configuration", error);
+    console.error("failed to save widget settings", error);
   } finally {
     if (form.isConnected) {
       submitButton.disabled = false;
       queryInput.disabled = false;
       countInput.disabled = false;
+      refreshSelect.disabled = false;
+      refreshSlider.disabled = refreshSelect.value !== "interval";
       form.removeAttribute("aria-busy");
     }
   }

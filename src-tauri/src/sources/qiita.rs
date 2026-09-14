@@ -92,7 +92,9 @@ fn parse_config(input: &str) -> Result<QiitaConfig, String> {
         return Err("Qiita query must be at most 512 characters".to_owned());
     }
     if !(1..=MAX_RESULTS).contains(&config.max_results) {
-        return Err(format!("Qiita maxResults must be between 1 and {MAX_RESULTS}"));
+        return Err(format!(
+            "Qiita maxResults must be between 1 and {MAX_RESULTS}"
+        ));
     }
     Ok(config)
 }

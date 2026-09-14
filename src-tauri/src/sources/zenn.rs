@@ -103,7 +103,9 @@ fn parse_config(input: &str) -> Result<ZennConfig, String> {
         return Err("Zenn user/topic value must use letters, numbers, '-' or '_'".to_owned());
     }
     if !(1..=MAX_RESULTS).contains(&config.max_results) {
-        return Err(format!("Zenn maxResults must be between 1 and {MAX_RESULTS}"));
+        return Err(format!(
+            "Zenn maxResults must be between 1 and {MAX_RESULTS}"
+        ));
     }
     Ok(config)
 }
@@ -175,6 +177,9 @@ mod tests {
         let items = parse_feed(body, 12, "{}", 123).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title.as_deref(), Some("Example Zenn post"));
-        assert_eq!(items[0].external_url, "https://zenn.dev/example/articles/abc");
+        assert_eq!(
+            items[0].external_url,
+            "https://zenn.dev/example/articles/abc"
+        );
     }
 }

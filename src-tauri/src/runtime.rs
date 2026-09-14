@@ -291,8 +291,12 @@ async fn run_refresh(
         "wikipedia" => {
             sources::wikipedia::fetch(&public_http, &key.source_config_json, attempt_started).await
         }
-        "qiita" => sources::qiita::fetch(&public_http, &key.source_config_json, attempt_started).await,
-        "zenn" => sources::zenn::fetch(&public_http, &key.source_config_json, attempt_started).await,
+        "qiita" => {
+            sources::qiita::fetch(&public_http, &key.source_config_json, attempt_started).await
+        }
+        "zenn" => {
+            sources::zenn::fetch(&public_http, &key.source_config_json, attempt_started).await
+        }
         "youtube" => {
             sources::youtube::fetch(&public_http, &key.source_config_json, attempt_started).await
         }

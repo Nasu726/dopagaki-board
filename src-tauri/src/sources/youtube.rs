@@ -94,10 +94,9 @@ fn parse_config(input: &str) -> Result<YouTubeConfig, String> {
     if !config.channel_id.is_empty()
         && (!(20..=32).contains(&config.channel_id.len())
             || !config.channel_id.starts_with("UC")
-            || !config
-                .channel_id
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_'))
+            || !config.channel_id.chars().all(|character| {
+                character.is_ascii_alphanumeric() || character == '-' || character == '_'
+            }))
     {
         return Err("YouTube channelId must be a valid UC-prefixed channel identifier".to_owned());
     }
@@ -150,9 +149,9 @@ fn stable_video_id(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     let candidate = trimmed.rsplit(':').next().unwrap_or(trimmed);
     let valid = candidate.len() == 11
-        && candidate
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_');
+        && candidate.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        });
     if valid {
         Ok(candidate.to_owned())
     } else {

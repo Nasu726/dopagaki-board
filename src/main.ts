@@ -92,7 +92,7 @@ type SourceGroup = {
   widgetIds: number[];
 };
 
-type ArxivSourceConfig = {
+type QuerySourceConfig = {
   query: string;
   maxResults: number;
 };
@@ -110,7 +110,7 @@ const SOURCE_LABELS: Record<string, string> = {
   zenn: "Zenn",
 };
 
-const ADDABLE_SOURCE_KINDS = ["arxiv", "wikipedia"] as const;
+const ADDABLE_SOURCE_KINDS = ["arxiv", "wikipedia", "qiita"] as const;
 const DEFAULT_GLOBAL_SHORTCUT = "CmdOrCtrl+Shift+Space";
 const COMPACT_CACHE_LIMIT = 3;
 const BOARD_CACHE_LIMIT = 25;
@@ -122,6 +122,8 @@ const DEFAULT_ARXIV_QUERY = "cat:cs.AI";
 const DEFAULT_ARXIV_MAX_RESULTS = 12;
 const DEFAULT_WIKIPEDIA_LANGUAGE = "ja";
 const DEFAULT_WIKIPEDIA_MAX_RESULTS = 12;
+const DEFAULT_QIITA_QUERY = "";
+const DEFAULT_QIITA_MAX_RESULTS = 12;
 
 function getAppRoot(): HTMLElement {
   const element = document.querySelector<HTMLElement>("#app");
@@ -396,7 +398,10 @@ function renderBoard(): void {
 
 function renderWidgetMarkup(widget: WidgetLayout): string {
   const label = sourceLabel(widget.sourceKind);
-  const configurable = widget.sourceKind === "arxiv" || widget.sourceKind === "wikipedia";
+  const configurable =
+    widget.sourceKind === "arxiv" ||
+    widget.sourceKind === "wikipedia" ||
+    widget.sourceKind === "qiita";
   const configButton = configurable
     ? `<button class="board-widget__config" data-config-widget type="button" aria-label="Configure ${label}" title="Widget settings">•••</button>`
     : "";
@@ -993,27 +998,43 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
     openWikipediaWidgetConfigEditor(element, widget);
     return;
   }
-  if (widget.sourceKind !== "arxiv") {
-    return;
+  if (widget.sourceKind === "arxiv" || widget.sourceKind === "qiita") {
+    openQuerySourceWidgetConfigEditor(element, widget);
   }
+}
+
+function openQuerySourceWidgetConfigEditor(element: HTMLElement, widget: WidgetLayout): void {
+  const isArxiv = widget.sourceKind === "arxiv";
+  const label = isArxiv ? "arXiv" : "Qiita";
+  const config = isArxiv
+    ? readQuerySourceConfig(
+        widget.sourceConfigJson,
+        DEFAULT_ARXIV_QUERY,
+        DEFAULT_ARXIV_MAX_RESULTS,
+      )
+    : readQuerySourceConfig(
+        widget.sourceConfigJson,
+        DEFAULT_QIITA_QUERY,
+        DEFAULT_QIITA_MAX_RESULTS,
+      );
+  const refreshFloor = isArxiv ? "24 h" : "1 h";
 
   for (const editor of document.querySelectorAll<HTMLElement>("[data-widget-config-editor]")) {
     editor.remove();
   }
 
-  const config = readArxivConfig(widget.sourceConfigJson);
   const refreshConfig = readWidgetRefreshConfig(widget.refreshConfigJson);
   const form = document.createElement("form");
   form.className = "board-widget-config";
   form.dataset.widgetConfigEditor = "";
-  form.setAttribute("aria-label", "arXiv widget settings");
+  form.setAttribute("aria-label", `${label} widget settings`);
   form.addEventListener("pointerdown", (event) => event.stopPropagation());
   form.addEventListener("click", (event) => event.stopPropagation());
 
   const header = document.createElement("div");
   header.className = "board-widget-config__header";
   const title = document.createElement("strong");
-  title.textContent = "arXiv widget";
+  title.textContent = `${label} widget`;
   const close = document.createElement("button");
   close.type = "button";
   close.className = "board-widget-config__close";
@@ -1031,7 +1052,7 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
   queryInput.maxLength = 512;
   queryInput.autocomplete = "off";
   queryInput.spellcheck = false;
-  queryInput.placeholder = DEFAULT_ARXIV_QUERY;
+  queryInput.placeholder = isArxiv ? DEFAULT_ARXIV_QUERY : "tag:Python";
   queryLabel.append(queryCaption, queryInput);
 
   const countLabel = document.createElement("label");
@@ -1048,7 +1069,9 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
 
   const help = document.createElement("p");
   help.className = "board-widget-config__help";
-  help.textContent = 'Example: cat:cs.AI · ti:"graph neural network"';
+  help.textContent = isArxiv
+    ? 'Example: cat:cs.AI · ti:"graph neural network"'
+    : "Leave empty for recent Qiita items. Example: tag:Python.";
 
   const refreshSection = document.createElement("div");
   refreshSection.className = "board-widget-config__refresh";
@@ -1080,7 +1103,7 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
 
   const refreshHelp = document.createElement("p");
   refreshHelp.className = "board-widget-config__help";
-  refreshHelp.textContent = "arXiv automatic refresh is always clamped to at least 24 h. Manual refresh still works while auto is OFF.";
+  refreshHelp.textContent = `${label} automatic refresh is always clamped to at least ${refreshFloor}. Manual refresh still works while auto is OFF.`;
   refreshSection.append(refreshLabel, refreshRange, refreshHelp);
 
   const syncRefreshControls = (): void => {
@@ -1123,7 +1146,7 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     void saveWidgetSettings(
-      id,
+      widget.id,
       element,
       form,
       JSON.stringify({
@@ -1310,20 +1333,24 @@ function openWikipediaWidgetConfigEditor(element: HTMLElement, widget: WidgetLay
   languageInput.select();
 }
 
-function readArxivConfig(sourceConfigJson: string): ArxivSourceConfig {
+function readQuerySourceConfig(
+  sourceConfigJson: string,
+  defaultQuery: string,
+  defaultMaxResults: number,
+): QuerySourceConfig {
   try {
-    const parsed = JSON.parse(sourceConfigJson) as Partial<ArxivSourceConfig>;
+    const parsed = JSON.parse(sourceConfigJson) as Partial<QuerySourceConfig>;
     return {
-      query: typeof parsed.query === "string" ? parsed.query : DEFAULT_ARXIV_QUERY,
+      query: typeof parsed.query === "string" ? parsed.query : defaultQuery,
       maxResults:
         typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
           ? parsed.maxResults
-          : DEFAULT_ARXIV_MAX_RESULTS,
+          : defaultMaxResults,
     };
   } catch {
     return {
-      query: DEFAULT_ARXIV_QUERY,
-      maxResults: DEFAULT_ARXIV_MAX_RESULTS,
+      query: defaultQuery,
+      maxResults: defaultMaxResults,
     };
   }
 }

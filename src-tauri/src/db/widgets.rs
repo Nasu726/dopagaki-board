@@ -24,18 +24,6 @@ pub(crate) fn list(connection: &Connection) -> Result<Vec<WidgetLayout>> {
     widgets
 }
 
-pub(crate) fn list_distinct_source_configs(
-    connection: &Connection,
-) -> Result<Vec<(String, String)>> {
-    let mut statement = connection.prepare(
-        "SELECT DISTINCT source_kind, source_config_json\n         FROM widgets\n         ORDER BY source_kind, source_config_json",
-    )?;
-    let rows = statement
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect();
-    rows
-}
-
 pub(crate) fn list_scheduler_source_configs(
     connection: &Connection,
 ) -> Result<Vec<(String, String, String)>> {
@@ -211,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn source_queries_avoid_decoding_full_widget_layouts() {
+    fn scheduler_and_refresh_fanout_queries_are_narrow() {
         let connection = database();
         let first_arxiv = create(&connection, "arxiv", 1.0, 1.0, 4.0, 3.0)
             .expect("first arxiv widget should be created");
@@ -223,13 +211,6 @@ mod tests {
         update_refresh_config(&connection, second_arxiv.id, r#"{"mode":"off"}"#)
             .expect("refresh config should update");
 
-        assert_eq!(
-            list_distinct_source_configs(&connection).expect("sources should list"),
-            vec![
-                ("arxiv".to_owned(), r#"{"query":"cat:cs.LG"}"#.to_owned()),
-                ("arxiv".to_owned(), "{}".to_owned()),
-            ]
-        );
         assert_eq!(
             list_ids_and_configs_for_source_kind(&connection, "arxiv")
                 .expect("arxiv source rows should list"),

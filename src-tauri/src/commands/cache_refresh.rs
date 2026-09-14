@@ -5,6 +5,7 @@ use crate::{
     refresh_settings, runtime, sources,
 };
 use serde::Serialize;
+use std::collections::HashSet;
 use tauri::{AppHandle, State};
 
 const DEFAULT_CACHE_LIMIT: usize = 3;
@@ -58,6 +59,69 @@ pub(crate) fn list_cached_items(
         .map_err(|_| "database lock was poisoned".to_owned())?;
     db::cache::list_top(&connection, limit)
         .map_err(|error| format!("failed to read cached items: {error}"))
+}
+
+#[tauri::command]
+pub(crate) fn list_compact_items(
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<CachedItem>, String> {
+    let limit = validate_cache_limit(limit.unwrap_or(DEFAULT_CACHE_LIMIT))?;
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "database lock was poisoned".to_owned())?;
+    let mut widgets = db::widgets::list(&connection)
+        .map_err(|error| format!("failed to list Compact widget sources: {error}"))?;
+
+    widgets.sort_by(|left, right| {
+        left.y
+            .total_cmp(&right.y)
+            .then_with(|| left.x.total_cmp(&right.x))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let mut visited_sources = HashSet::new();
+    let mut visited_items = HashSet::new();
+    let mut compact = Vec::with_capacity(limit);
+
+    for widget in widgets {
+        if compact.len() >= limit || !sources::is_supported(&widget.source_kind) {
+            continue;
+        }
+        let normalized = match sources::normalize_config(&widget.source_kind, &widget.source_config_json)
+        {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!(
+                    "ignoring invalid Compact {} source configuration: {error}",
+                    widget.source_kind
+                );
+                continue;
+            }
+        };
+        if !visited_sources.insert((widget.source_kind.clone(), normalized.clone())) {
+            continue;
+        }
+
+        let candidates = db::cache::list_for_source(
+            &connection,
+            &widget.source_kind,
+            &normalized,
+            limit - compact.len(),
+        )
+        .map_err(|error| format!("failed to read Compact source cache: {error}"))?;
+        for item in candidates {
+            if visited_items.insert(item.id.clone()) {
+                compact.push(item);
+                if compact.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(compact)
 }
 
 #[tauri::command]

@@ -59,7 +59,7 @@ PR #52: `Ship real Wikipedia, Qiita, Zenn and YouTube source adapters`
 
 - base: `main`
 - head branch: `real-source-adapters-clean`
-- current recorded head before the next fix: `089c8844b27a73d667003ac8c4e0ce92ccad6821`
+- rustfmt-fix commit: `fdf90be73eeaa868ee0510ff3f657cca7fdf4fc3`
 - PR is intentionally still a draft
 - related issue: #48
 
@@ -99,37 +99,29 @@ The branch currently adds the backend adapter slice for four real public sources
 - no placeholder source is intentionally exposed
 - NHK remains absent
 
-## Current CI state / failure
+## Latest short checkpoint: rustfmt repair
 
-The first CI run for PR #52 reached frontend production build successfully. Linux and macOS then failed at Rust formatting; this is a formatting-only failure, not yet a compile/test verdict for the new adapters because later Rust steps were skipped after `cargo fmt --check` failed.
+The first PR #52 CI attempt reached the frontend production build, then Linux/macOS stopped at `cargo fmt --check`. The failure was formatting-only, so it was repaired without broadening product behavior.
 
-Linux run: `34842948897`.
+Commit `fdf90be73eeaa868ee0510ff3f657cca7fdf4fc3` applies exactly the formatter changes reported by CI:
 
-Exact rustfmt changes reported by CI:
+- multiline Qiita/Zenn runtime match arms
+- rustfmt wrapping in Qiita/Zenn validation errors
+- rustfmt wrapping for YouTube identifier predicates
+- wrapped Zenn URL assertion
+- canonical final newlines in the affected Rust files
 
-- `src-tauri/src/runtime.rs`
-  - format the Qiita and Zenn match arms as multiline blocks
-  - remove an extra trailing blank line at EOF
-- `src-tauri/src/sources/mod.rs`
-  - remove an extra trailing blank line at EOF
-- `src-tauri/src/sources/qiita.rs`
-  - wrap the long `maxResults` error `format!` expression
-  - remove an extra trailing blank line at EOF
-- `src-tauri/src/sources/wikipedia.rs`
-  - remove an extra trailing blank line at EOF
-- `src-tauri/src/sources/youtube.rs`
-  - rustfmt the long `channel_id.chars().all(...)` conditions
-  - remove an extra trailing blank line at EOF
-- `src-tauri/src/sources/zenn.rs`
-  - wrap the long `maxResults` error `format!` expression
-  - wrap the long external URL assertion
-  - remove an extra trailing blank line at EOF
+A new three-platform CI cycle was confirmed started for this head:
 
-Windows was still running when the formatting failure was inspected; because Linux/macOS already prove the branch needs a new commit, do not wait on that stale head before fixing formatting.
+- Linux run `34847122896`
+- Windows run `34847122868`
+- macOS run `34847122923`
+
+At the checkpoint those runs were queued. Do not infer compile/test success yet. The next session should inspect these exact runs rather than polling an obsolete head.
 
 ## What is deliberately NOT complete in PR #52 yet
 
-Do not merge #52 after merely fixing rustfmt. The PR body correctly states it is still WIP. Before merge, it still needs:
+Do not merge #52 merely because formatting is fixed. The PR body correctly states it is still WIP. Before merge, it still needs:
 
 1. frontend add-picker exposure for the newly real adapters
 2. real source-specific widget configuration surfaces (no fake generic JSON editor)
@@ -138,8 +130,8 @@ Do not merge #52 after merely fixing rustfmt. The PR body correctly states it is
 5. durable documentation in `docs/HANDOFF.md` / decisions where appropriate
 6. Linux, Windows, and macOS CI green on the final merge candidate
 
-The current frontend still has `ADDABLE_SOURCE_KINDS = ["arxiv"]`, and the contextual source editor currently handles only arXiv. That is intentional until each new adapter's real fields are exposed cleanly.
+The current frontend still has `ADDABLE_SOURCE_KINDS = ["arxiv"]`, and the contextual source editor currently handles only arXiv. That remains intentional until each new adapter's real fields are exposed cleanly.
 
 ## Next short batch
 
-Apply only the rustfmt changes listed above, push them to `real-source-adapters-clean`, and confirm a new CI run starts. Do not wait through a long CI cycle in the same uninterrupted batch. After that checkpoint, the following batch should implement frontend configuration/add-picker exposure source by source, starting with the simplest adapter rather than changing all four at once.
+Inspect the three CI runs above. If rustfmt now passes, handle only the first substantive compile/test failure if one exists, then checkpoint again. If the backend slice is green, begin frontend exposure one source at a time, starting with Wikipedia because its user-facing configuration is the smallest (`language` + result count) and it already has image/no-image presentation value. Do not implement all four configuration UIs in one uninterrupted batch.

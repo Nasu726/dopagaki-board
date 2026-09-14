@@ -42,9 +42,23 @@ PR #52 currently has real backend adapters for:
 
 The branch also centralizes a reusable public HTTP client and source-specific automatic-refresh floors. There are no placeholder sources and NHK remains explicitly out of scope.
 
-The frontend has **not** yet exposed the new adapters. `ADDABLE_SOURCE_KINDS` still contains only `arxiv`, and the contextual source editor is still arXiv-specific. This is intentional until each adapter has a real typed configuration surface. The next frontend slice should start with Wikipedia only (`language` + `maxResults`), validate through the existing Rust command, and then proceed source-by-source.
+### Frontend exposure on PR #52
 
-A previous PR #52 head failed all three OS CI jobs for one stale test: `commands::tests::source_validation_only_accepts_live_adapters` still expected YouTube to be unsupported. Commit `1dd692b` updates that regression test to accept the five live backend adapters and reject `nhk` / unknown kinds. Re-run Linux/Windows/macOS CI is pending on the active branch; inspect current GitHub state rather than assuming this note is still current.
+Wikipedia is now the first new adapter exposed end-to-end in the Board frontend:
+
+- add picker shows `arxiv` and `wikipedia`
+- Wikipedia widget settings expose typed `language` and `maxResults` controls
+- source edits still pass through `update_widget_source_config`, so Rust adapter validation/canonicalization remains authoritative
+- Wikipedia gets the same per-widget inherit/OFF/custom refresh controls and manual refresh button as arXiv
+- its automatic refresh is clamped by the backend to at least 6 h
+- successful edits update only the widget's in-memory state and content node, then rehydrate that source identity; they do not rebuild the Board
+- Board feed rows use flex layout so both thumbnail and no-thumbnail Wikipedia results consume the row correctly
+
+Qiita, Zenn, and YouTube remain backend-only and intentionally absent from the add picker until each gets its own real typed configuration UI. Do not expose them through a generic JSON editor.
+
+A previous PR #52 head failed all three OS CI jobs for one stale test: `commands::tests::source_validation_only_accepts_live_adapters` still expected YouTube to be unsupported. Commit `1dd692b` updates that regression test to accept the five live backend adapters and reject `nhk` / unknown kinds.
+
+Wikipedia frontend commit `cc049e6` subsequently passed frontend production build on Linux, Windows, and macOS; Linux also passed rustfmt, Rust tests, and Rust check before its release build. Commit `e57331e` then repaired Board rows without thumbnails. Because later documentation commits create newer PR heads, inspect the current head's workflows rather than treating those intermediate results as final merge evidence.
 
 Maintenance note: old stacked PR #39 was superseded by clean PR #41. Accidental duplicate Issues #29-#33 were created during tool setup and immediately closed as not planned.
 
@@ -143,7 +157,7 @@ Issue #35 established the source-editing boundary. Preserve these rules:
 - Board configuration UI is contextual and widget-local; opening or saving it must not rebuild the whole Board
 - after a successful edit, update the in-memory widget config and rehydrate only that widget from the new source identity; later `cache-changed` events continue the normal narrow update path
 
-The current shipped editor exposes arXiv `query` and `maxResults` (1..25). On PR #52, add real typed editors source-by-source; do not fall back to a generic JSON editor.
+`main` currently ships the arXiv editor (`query` + `maxResults`, 1..25). PR #52 adds the Wikipedia editor (`language` + `maxResults`, 1..25) using the same command boundary. Continue source-by-source; do not fall back to a generic JSON editor for Qiita/Zenn/YouTube.
 
 ## Current source adapter policy
 
@@ -259,6 +273,8 @@ Compact source priority follows active Board widgets in spatial order: top-to-bo
 
 Cache hydration must not replace widget containers or reset pointer gestures; update only each widget's content node. Manual-refresh and source-config controls are excluded from the drag-handle pointer path.
 
+Board feed items must remain usable whether `image_url` is present or absent. The current row layout is flex-based: optional thumbnail has a fixed basis and text flexes to consume remaining/full width. Do not reintroduce a two-column grid that leaves a blank column when an image is absent.
+
 ## Rust temporary-lifetime pitfall
 
 Two prior `E0597` incidents came from tail expressions retaining a temporary longer than expected:
@@ -312,8 +328,8 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 
 1. Read `AGENTS.md`, `README.md`, this file, `docs/ACTIVE_WORK.md` when present, and `docs/DECISIONS.md`.
 2. Treat GitHub state as authoritative after an interrupted or overlapping stream. `main` is through PR #51; PR #52 on `real-source-adapters-clean` is the active product work until GitHub says otherwise.
-3. Inspect PR #52 head and all three CI workflows before changing code. Do not assume the stale-test failure described above is still current.
-4. Keep the new backend adapters hidden from the add picker until their own real configuration UI exists. Do not ship generic JSON controls or fake placeholders.
-5. Next planned frontend slice: Wikipedia only. Expose it in the add picker, add a widget-local `language` + `maxResults` editor using the existing Rust validation command, expose manual refresh, and verify image/no-image Board rendering without whole-Board rebuilds.
-6. After Wikipedia is validated, repeat the same bounded source-by-source process for Qiita, Zenn, and YouTube rather than exposing all four at once.
+3. Inspect PR #52 head and all three CI workflows before changing code. Do not assume any intermediate green run is the final head.
+4. Wikipedia is the only new adapter currently exposed in the add picker. Keep Qiita/Zenn/YouTube hidden until each has its own real typed configuration UI.
+5. Validate the final Wikipedia head across Linux/Windows/macOS. If green, the next bounded frontend slice is Qiita (`query` + `maxResults`), preserving Rust-side validation and narrow widget-only rehydration.
+6. After Qiita, continue one source at a time for Zenn and YouTube; do not expose all remaining sources in one batch.
 7. Reconcile `docs/ACTIVE_WORK.md` at each checkpoint, update durable docs/decisions where semantics changed, and require Linux/Windows/macOS release-build CI green before merging PR #52.

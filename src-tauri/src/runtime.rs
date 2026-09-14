@@ -154,9 +154,7 @@ fn sync_scheduler_sources(app: &AppHandle, now: i64) -> Result<(), String> {
             let key = match source_key(source_kind.clone(), source_config_json) {
                 Ok(key) => key,
                 Err(error) => {
-                    eprintln!(
-                        "ignoring invalid {source_kind} source configuration: {error}"
-                    );
+                    eprintln!("ignoring invalid {source_kind} source configuration: {error}");
                     continue;
                 }
             };
@@ -379,7 +377,8 @@ fn matching_widget_ids(widget_sources: &[(i64, String)], key: &SourceKey) -> Vec
     widget_sources
         .iter()
         .filter_map(|(id, source_config_json)| {
-            let widget_key = source_key(key.source_kind.clone(), source_config_json.clone()).ok()?;
+            let widget_key =
+                source_key(key.source_kind.clone(), source_config_json.clone()).ok()?;
             (widget_key == *key).then_some(*id)
         })
         .collect()
@@ -420,10 +419,7 @@ mod tests {
         let key = source_key("arxiv".to_owned(), "{}".to_owned()).expect("source key should parse");
         let widget_sources = vec![
             (1, "{}".to_owned()),
-            (
-                2,
-                r#"{"query":"cat:cs.AI","maxResults":12}"#.to_owned(),
-            ),
+            (2, r#"{"query":"cat:cs.AI","maxResults":12}"#.to_owned()),
             (3, r#"{"query":"cat:cs.LG"}"#.to_owned()),
         ];
 

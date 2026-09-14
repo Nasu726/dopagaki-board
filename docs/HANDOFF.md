@@ -2,11 +2,11 @@
 
 This is the live restart point for long-running development. Keep information here when it would otherwise exist only in chat or local terminal history.
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 ## Current checkpoint
 
-Merged to `main`:
+Merged to `main` through PR #51. Important milestones include:
 
 - PR #12: free-placement Board
 - PR #16: configurable global shortcut + Rust-owned Idle badge
@@ -18,18 +18,35 @@ Merged to `main`:
 - PR #26: event/deadline-driven refresh runtime + first real arXiv adapter
 - PR #27: current `src-tauri/Cargo.lock` + `--locked` Rust CI on Linux/Windows/macOS
 - PR #34: first post-runtime deletion/simplification pass
-- PR #40: editable validated arXiv widget source settings + contextual Board editor
 - PR #38: committed frontend lockfile + `npm ci` across Linux/Windows/macOS CI
+- PR #40: editable validated arXiv widget source settings + contextual Board editor
+- PR #50: confirmed responsive 12x8 Board grid, overlap prevention, eight-direction resizing, source ordering, Windows shell/usability pass, and first real Windows performance observation
+- PR #51: source-aware refresh defaults and per-widget refresh policy UI
 
-Issue #5 (cache/scheduler), Issue #15 (Rust lockfile/reproducibility), Issue #21 (runtime/arXiv), Issue #28 (first simplification pass), and Issue #35 (editable arXiv widget source configuration) are complete.
+The product is past the first functional MVP checkpoint. Idle / Compact / Board, cache-first presentation, event-driven refresh, real arXiv fetching, manual/automatic refresh, contextual source editing, responsive integer-grid placement, and source-aware refresh controls are on `main`.
 
-**Functional MVP checkpoint reached.** There is no active product feature branch. Idle / Compact / free-form Board, cached presentation, event-driven refresh, one real arXiv adapter, manual/automatic refresh, and contextual arXiv query/result-count editing are all on `main`, with Linux/Windows/macOS CI green on the merge candidate.
+### Active branch / PR
 
-This is a first-complete usability checkpoint, not a claim that product validation is finished. The next product-facing work should come from real desktop use: capture the pending Idle CPU/RSS baseline, inspect small/wide/half-screen behavior, and fix observed friction before adding adapters indiscriminately. Figma comparison/mock work is intentionally deferred and is not required for the current direction; revisit it only if real-use feedback exposes a design problem that benefits from a visual exploration step.
+There is one active product branch:
 
-Maintenance stream: PR #38 established `package-lock.json` + `npm ci`. The measured cache experiment from old stacked PR #39 was rebuilt cleanly as PR #41 after #38 merged; #39 is superseded. Keep maintenance changes separate from product behavior.
+- branch: `real-source-adapters-clean`
+- draft PR: #52, `Ship real Wikipedia, Qiita, Zenn and YouTube source adapters`
+- parent issue: #48
 
-Accidental duplicate Issues #29–#33 were created during tool setup and immediately closed as not planned.
+PR #52 currently has real backend adapters for:
+
+- Wikipedia: public MediaWiki API, random article generator, PageImages thumbnails
+- Qiita: public items API with optional query
+- Zenn: public RSS for trend / user / topic feeds
+- YouTube: selected-channel public RSS with thumbnail-first cache rows
+
+The branch also centralizes a reusable public HTTP client and source-specific automatic-refresh floors. There are no placeholder sources and NHK remains explicitly out of scope.
+
+The frontend has **not** yet exposed the new adapters. `ADDABLE_SOURCE_KINDS` still contains only `arxiv`, and the contextual source editor is still arXiv-specific. This is intentional until each adapter has a real typed configuration surface. The next frontend slice should start with Wikipedia only (`language` + `maxResults`), validate through the existing Rust command, and then proceed source-by-source.
+
+A previous PR #52 head failed all three OS CI jobs for one stale test: `commands::tests::source_validation_only_accepts_live_adapters` still expected YouTube to be unsupported. Commit `1dd692b` updates that regression test to accept the five live backend adapters and reject `nhk` / unknown kinds. Re-run Linux/Windows/macOS CI is pending on the active branch; inspect current GitHub state rather than assuming this note is still current.
+
+Maintenance note: old stacked PR #39 was superseded by clean PR #41. Accidental duplicate Issues #29-#33 were created during tool setup and immediately closed as not planned.
 
 The repository is public. Standard GitHub-hosted Actions are no longer constrained by the former private-repository monthly minute quota, but CI latency and reproducibility still matter.
 
@@ -104,7 +121,7 @@ Keep these semantics:
 - refreshing an existing cache row preserves its seen state
 - a newly inserted duplicate source row inherits already-seen state if that external id was seen elsewhere
 
-`src-tauri/src/source_config.rs` is the canonical source-config boundary:
+`src-tauri/src/source_config.rs` is the canonical generic source-config boundary:
 
 - JSON object only, bounded to 16 KiB
 - recursively sort object keys
@@ -116,17 +133,31 @@ Do not introduce a second source-key representation.
 
 ## Widget source configuration
 
-Issue #35 establishes the source-editing boundary. Preserve these rules:
+Issue #35 established the source-editing boundary. Preserve these rules:
 
 - widget source configuration is updated through an explicit Rust/Tauri command, never by direct frontend DB writes
 - generic JSON shape canonicalization remains in `source_config.rs`; adapter semantics belong in the adapter
-- arXiv defaults normalize sparsely, so `{}` and an explicit default query/count identify the same source and share cache/scheduler work
+- adapter defaults normalize sparsely, so semantically default configs collapse to the same source identity where the adapter defines that behavior
 - invalid edits must leave the last persisted valid config untouched
 - saving a config wakes the existing event/deadline runtime; it does not create another polling loop
 - Board configuration UI is contextual and widget-local; opening or saving it must not rebuild the whole Board
 - after a successful edit, update the in-memory widget config and rehydrate only that widget from the new source identity; later `cache-changed` events continue the normal narrow update path
 
-The initial editor exposes arXiv `query` and `maxResults` (1..25). Other source kinds must not get placeholder configuration panels until their adapters define real user-facing fields.
+The current shipped editor exposes arXiv `query` and `maxResults` (1..25). On PR #52, add real typed editors source-by-source; do not fall back to a generic JSON editor.
+
+## Current source adapter policy
+
+`src-tauri/src/sources/` is authoritative for source-specific config validation, network behavior, parsing, and hard refresh floors.
+
+Current backend source kinds on PR #52:
+
+- `arxiv`: default query `cat:cs.AI`, default bounded result count, automatic floor 24 h
+- `wikipedia`: default language `ja`, default 12 results, `maxResults` 1..25, language code 2..16 lowercase ASCII letters/hyphen, automatic floor 6 h
+- `qiita`: optional query + bounded result count, automatic floor 1 h
+- `zenn`: typed feed selection for public RSS, automatic floor 1 h
+- `youtube`: selected-channel RSS, automatic floor 1 h
+
+Do not duplicate adapter validation rules in the generic config canonicalizer. Frontend controls may provide friendly constraints, but the Rust adapter boundary remains authoritative.
 
 ## Scheduler + runtime invariants
 
@@ -146,6 +177,7 @@ Current scheduler invariants:
 - blocked work cannot execute before `blocked_until`
 - persisted success/failure state is restored after restart
 - scheduler exposes its next meaningful wakeup deadline
+- source-specific hard floors clamp automatic scheduling but do not replace scheduler backoff / request gates
 
 Automatic-refresh setting decoding/persistence/validation is centralized in `src-tauri/src/refresh_settings.rs`. Do not reintroduce separate copies in command and runtime code.
 
@@ -179,7 +211,7 @@ Preserve these source-specific constraints:
 - manual refresh can still be requested while automatic refresh is OFF, but respects scheduler backoff and the arXiv request gate
 - no invented ETag/Last-Modified support
 
-Current default config `{}` means arXiv query `cat:cs.AI` with a bounded result count. Stable arXiv cache ids strip version suffixes so `...v2` is the same logical paper as the earlier version.
+Stable arXiv cache ids strip version suffixes so `...v2` is the same logical paper as the earlier version.
 
 ## Cache/UI boundary
 
@@ -194,22 +226,7 @@ Startup remains cache-first. `runtime::start` constructs clients/spawns the coor
 - shell unseen badge remains Rust-owned
 - never rebuild the whole Board merely because background freshness changed
 
-Manual refresh is currently exposed only where an actual adapter exists (arXiv). The button enqueues work; scheduler/backoff/request-gate policy owns actual execution.
-
-## Simplification pass #28
-
-The first deliberate post-runtime reduction pass targets code that accumulated during bootstrap/runtime bring-up rather than adding another feature.
-
-Current changes:
-
-- delete unused `bootstrap_probe` command and its `BootstrapProbe` transport type
-- delete the unused manual `set_unseen` command; unseen state now comes from cache/runtime ownership only
-- remove those commands from Tauri registration
-- centralize auto-refresh setting read/write/validation in `refresh_settings.rs`
-- delete duplicate interval constants/parsing/tests from command/runtime modules
-- correct roadmap and performance-baseline documents that still described a pre-adapter state
-
-The intent is to reduce command surface and policy duplication without changing UI behavior or scheduler/runtime boundaries.
+Manual refresh should be available for each frontend-exposed real adapter. The button only enqueues work; scheduler/backoff/source policy owns actual execution.
 
 ## Tauri command macro boundary
 
@@ -232,9 +249,13 @@ Default shortcut: `CmdOrCtrl+Shift+Space`.
 
 ## Board implementation knowledge
 
+Board geometry is a responsive logical 12x8 integer grid. Widgets are integer rectangles, cannot overlap, and do not push/reflow neighbors. Empty Board space is the primary add action.
+
 Board drag/resize mutates DOM during pointer movement and persists geometry once at gesture end. Do not write SQLite on every pointer move.
 
 The frontend remains Vanilla TypeScript. Do not add React/Vue/Svelte, a grid engine, or canvas dependency for current interactions.
+
+Compact source priority follows active Board widgets in spatial order: top-to-bottom, then left-to-right. Deleted/stale source cache must not surface merely because it remains in SQLite.
 
 Cache hydration must not replace widget containers or reset pointer gestures; update only each widget's content node. Manual-refresh and source-config controls are excluded from the drag-handle pointer path.
 
@@ -249,11 +270,20 @@ For this family of error, first make destruction order explicit with a local bin
 
 ## Performance baseline status
 
-`docs/PERF_BASELINE.md` contains the canonical procedure. The release-build/process-tree tooling landed before the arXiv adapter, but the actual numeric pre-adapter baseline was not captured. Do not fabricate it retroactively.
+`docs/PERF_BASELINE.md` contains the canonical procedure and measured observations.
 
-The first real numeric baseline should be captured from the current release build with no refresh/preload work due. For the cleanest run, use no supported source widget or auto-refresh OFF and ensure no manual/background request is running.
+A first real Windows release-build observation was captured on 2026-09-14:
 
-Canonical Linux command:
+- Idle memory: about 109 MB, stable during observation
+- Task Manager CPU: displayed as 0%
+- disk: displayed as 0 MB/s
+- network: displayed as 0 Mbps
+- separate Board observation with five widgets: app process about 5.3 MB and WebView2 Manager about 120.0 MB; these are a separate process-tree observation and must not be added to the 109 MB Idle figure as if they were one sample
+- state transitions and Board drag/resize were responsive in that manual run
+
+This is a practical observation, not a lab-grade benchmark. It is nevertheless within the current <=150 MiB Idle memory budget and replaces the old `TBD` claim in this handoff. Do not fabricate a missing historical pre-adapter baseline.
+
+Canonical Linux measurement remains:
 
 ```bash
 npm ci
@@ -263,12 +293,11 @@ APP_PID=$!
 python3 scripts/measure_idle_linux.py --pid "$APP_PID" --settle 60 --duration 300 --interval 1 --csv /tmp/dopagaki-idle.csv
 ```
 
-Real CPU/RSS/network values remain TBD until a desktop session is available.
-
 ## Repository-memory protocol
 
 - settled decisions: `docs/DECISIONS.md`
 - current checkpoint / incidents / next actions: this file
+- active short-batch checkpoint while a feature branch is live: `docs/ACTIVE_WORK.md`
 - architecture: `docs/ARCHITECTURE.md`
 - performance method: `docs/PERFORMANCE.md`
 - measured baselines: `docs/PERF_BASELINE.md`
@@ -281,10 +310,10 @@ When reusable knowledge would otherwise exist only in chat, update the appropria
 
 ## Restart checklist
 
-1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Treat GitHub state as authoritative after an interrupted or overlapping stream; the product MVP checkpoint is PR #40 on `main`.
-3. Inspect parent performance Issue #6 and the maintenance stream (#38 merged; #39 superseded by clean PR #41) before starting new work.
-4. Capture the real release-build Idle baseline when a desktop session is available; do not infer or fabricate the missing pre-adapter numbers.
-5. Use the app on a real desktop at small, wide, and half-screen Board sizes and record concrete friction before broadening scope.
-6. Choose the next adapter deliberately (likely YouTube or Wikipedia) only after that checkpoint, reusing the established scheduler/runtime/cache/source-config boundaries.
-7. Keep Linux/Windows/macOS release-build CI green for every merge candidate.
+1. Read `AGENTS.md`, `README.md`, this file, `docs/ACTIVE_WORK.md` when present, and `docs/DECISIONS.md`.
+2. Treat GitHub state as authoritative after an interrupted or overlapping stream. `main` is through PR #51; PR #52 on `real-source-adapters-clean` is the active product work until GitHub says otherwise.
+3. Inspect PR #52 head and all three CI workflows before changing code. Do not assume the stale-test failure described above is still current.
+4. Keep the new backend adapters hidden from the add picker until their own real configuration UI exists. Do not ship generic JSON controls or fake placeholders.
+5. Next planned frontend slice: Wikipedia only. Expose it in the add picker, add a widget-local `language` + `maxResults` editor using the existing Rust validation command, expose manual refresh, and verify image/no-image Board rendering without whole-Board rebuilds.
+6. After Wikipedia is validated, repeat the same bounded source-by-source process for Qiita, Zenn, and YouTube rather than exposing all four at once.
+7. Reconcile `docs/ACTIVE_WORK.md` at each checkpoint, update durable docs/decisions where semantics changed, and require Linux/Windows/macOS release-build CI green before merging PR #52.

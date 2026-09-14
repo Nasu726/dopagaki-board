@@ -195,21 +195,14 @@ mod tests {
         create(&connection, "youtube", 9.0, 10.0, 11.0, 12.0)
             .expect("youtube widget should be created");
 
-        update_source_config(
-            &connection,
-            second_arxiv.id,
-            r#"{"query":"cat:cs.LG"}"#,
-        )
-        .expect("source config should update");
+        update_source_config(&connection, second_arxiv.id, r#"{"query":"cat:cs.LG"}"#)
+            .expect("source config should update");
 
         assert_eq!(
             list_distinct_source_configs(&connection).expect("sources should list"),
             vec![
                 ("arxiv".to_owned(), "{}".to_owned()),
-                (
-                    "arxiv".to_owned(),
-                    r#"{"query":"cat:cs.LG"}"#.to_owned(),
-                ),
+                ("arxiv".to_owned(), r#"{"query":"cat:cs.LG"}"#.to_owned(),),
                 ("youtube".to_owned(), "{}".to_owned()),
             ]
         );
@@ -218,10 +211,7 @@ mod tests {
                 .expect("arxiv source rows should list"),
             vec![
                 (first_arxiv.id, "{}".to_owned()),
-                (
-                    second_arxiv.id,
-                    r#"{"query":"cat:cs.LG"}"#.to_owned(),
-                ),
+                (second_arxiv.id, r#"{"query":"cat:cs.LG"}"#.to_owned(),),
             ]
         );
         assert!(

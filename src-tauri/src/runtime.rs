@@ -142,21 +142,20 @@ fn sync_scheduler_sources(app: &AppHandle, now: i64) -> Result<(), String> {
             .lock()
             .map_err(|_| "database lock was poisoned".to_owned())?;
         let global_interval = refresh_settings::read(&connection)?;
-        let widgets = db::widgets::list(&connection)
+        let source_configs = db::widgets::list_distinct_source_configs(&connection)
             .map_err(|error| format!("failed to list widget sources: {error}"))?;
 
         let mut snapshots: HashMap<SourceKey, SourceRefreshState> = HashMap::new();
-        for widget in widgets {
-            if !sources::is_supported(&widget.source_kind) {
+        for (source_kind, source_config_json) in source_configs {
+            if !sources::is_supported(&source_kind) {
                 continue;
             }
 
-            let key = match source_key(widget.source_kind.clone(), widget.source_config_json) {
+            let key = match source_key(source_kind.clone(), source_config_json) {
                 Ok(key) => key,
                 Err(error) => {
                     eprintln!(
-                        "ignoring invalid {} source configuration for widget {}: {error}",
-                        widget.source_kind, widget.id
+                        "ignoring invalid {source_kind} source configuration: {error}"
                     );
                     continue;
                 }
@@ -283,9 +282,10 @@ fn finish_success(
         .map_err(|error| format!("failed to persist refresh success: {error}"))?;
         let has_unseen = db::cache::has_unseen(&transaction)
             .map_err(|error| format!("failed to read unseen cache state: {error}"))?;
-        let widgets = db::widgets::list(&transaction)
-            .map_err(|error| format!("failed to list widgets after refresh: {error}"))?;
-        let widget_ids = matching_widget_ids(&widgets, key);
+        let widget_sources =
+            db::widgets::list_ids_and_configs_for_source_kind(&transaction, &key.source_kind)
+                .map_err(|error| format!("failed to list widgets after refresh: {error}"))?;
+        let widget_ids = matching_widget_ids(&widget_sources, key);
         transaction
             .commit()
             .map_err(|error| format!("failed to commit cache transaction: {error}"))?;
@@ -371,16 +371,12 @@ fn finish_failure(app: &AppHandle, key: &SourceKey, reason: &str) {
     wake(&state);
 }
 
-fn matching_widget_ids(widgets: &[db::widgets::WidgetLayout], key: &SourceKey) -> Vec<i64> {
-    widgets
+fn matching_widget_ids(widget_sources: &[(i64, String)], key: &SourceKey) -> Vec<i64> {
+    widget_sources
         .iter()
-        .filter_map(|widget| {
-            let widget_key = source_key(
-                widget.source_kind.clone(),
-                widget.source_config_json.clone(),
-            )
-            .ok()?;
-            (widget_key == *key).then_some(widget.id)
+        .filter_map(|(id, source_config_json)| {
+            let widget_key = source_key(key.source_kind.clone(), source_config_json.clone()).ok()?;
+            (widget_key == *key).then_some(*id)
         })
         .collect()
 }
@@ -409,4 +405,24 @@ fn unix_seconds() -> Result<i64, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("system clock error: {error}"))
         .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matching_widget_ids_preserves_semantic_config_equivalence() {
+        let key = source_key("arxiv".to_owned(), "{}".to_owned()).expect("source key should parse");
+        let widget_sources = vec![
+            (1, "{}".to_owned()),
+            (
+                2,
+                r#"{"query":"cat:cs.AI","maxResults":12}"#.to_owned(),
+            ),
+            (3, r#"{"query":"cat:cs.LG"}"#.to_owned()),
+        ];
+
+        assert_eq!(matching_widget_ids(&widget_sources, &key), vec![1, 2]);
+    }
 }

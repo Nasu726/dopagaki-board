@@ -71,7 +71,8 @@
   font-weight: 700;
 }
 
-.settings-section input[type="text"] {
+.settings-section input[type="text"],
+.settings-section select {
   width: 100%;
   min-width: 0;
   height: 34px;
@@ -80,6 +81,10 @@
   border-radius: 9px;
   color: #202631;
   background: white;
+  font-size: 10px;
+}
+
+.settings-section input[type="text"] {
   font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -128,5 +133,94 @@
   color: #39414d;
   font-size: 10px;
   font-weight: 700;
+  text-align: right;
+}
+
+.settings-source-list {
+  display: grid;
+  gap: 7px;
+  color: #868e99;
+  font-size: 9px;
+}
+
+.settings-source-row {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #eceff3;
+  border-radius: 10px;
+  background: #fafbfc;
+}
+
+.settings-source-row__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-source-row__heading strong {
+  color: #303744;
+  font-size: 10px;
+}
+
+.settings-source-row__heading span {
+  color: #818a96;
+  font-size: 8.5px;
+}
+
+.settings-source-row__range[hidden] {
+  display: none;
+}
+
+.board-widget-config__refresh {
+  display: grid;
+  gap: 6px;
+  padding-top: 7px;
+  border-top: 1px solid #eef0f2;
+}
+
+.board-widget-config__field select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 4px 7px;
+  border: 1px solid #e1e5ea;
+  border-radius: 8px;
+  outline: none;
+  color: #303743;
+  background: #fafbfc;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.board-widget-config__field select:focus {
+  border-color: #9eb4df;
+  box-shadow: 0 0 0 2px rgba(85, 127, 218, 0.12);
+}
+
+.board-widget-config__range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 6px;
+}
+
+.board-widget-config__range[hidden] {
+  display: none;
+}
+
+.board-widget-config__range input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: #557fda;
+}
+
+.board-widget-config__range output {
+  color: #596371;
+  font-size: 8.5px;
+  font-weight: 650;
   text-align: right;
 }

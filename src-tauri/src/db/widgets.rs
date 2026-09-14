@@ -24,6 +24,31 @@ pub(crate) fn list(connection: &Connection) -> Result<Vec<WidgetLayout>> {
     widgets
 }
 
+pub(crate) fn list_distinct_source_configs(
+    connection: &Connection,
+) -> Result<Vec<(String, String)>> {
+    let mut statement = connection.prepare(
+        "SELECT DISTINCT source_kind, source_config_json\n         FROM widgets\n         ORDER BY source_kind, source_config_json",
+    )?;
+    let rows = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect();
+    rows
+}
+
+pub(crate) fn list_ids_and_configs_for_source_kind(
+    connection: &Connection,
+    source_kind: &str,
+) -> Result<Vec<(i64, String)>> {
+    let mut statement = connection.prepare(
+        "SELECT id, source_config_json\n         FROM widgets\n         WHERE source_kind = ?1\n         ORDER BY id",
+    )?;
+    let rows = statement
+        .query_map([source_kind], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect();
+    rows
+}
+
 pub(crate) fn get(connection: &Connection, id: i64) -> Result<Option<WidgetLayout>> {
     connection
         .query_row(
@@ -158,5 +183,41 @@ mod tests {
         assert_eq!(updated.y, 18.0);
         assert_eq!(updated.width, 280.0);
         assert_eq!(updated.height, 180.0);
+    }
+
+    #[test]
+    fn source_queries_avoid_decoding_full_widget_layouts() {
+        let connection = database();
+        let first_arxiv = create(&connection, "arxiv", 1.0, 2.0, 3.0, 4.0)
+            .expect("first arxiv widget should be created");
+        let second_arxiv = create(&connection, "arxiv", 5.0, 6.0, 7.0, 8.0)
+            .expect("second arxiv widget should be created");
+        create(&connection, "youtube", 9.0, 10.0, 11.0, 12.0)
+            .expect("youtube widget should be created");
+
+        update_source_config(&connection, second_arxiv.id, r#"{"query":"cat:cs.LG"}"#)
+            .expect("source config should update");
+
+        assert_eq!(
+            list_distinct_source_configs(&connection).expect("sources should list"),
+            vec![
+                ("arxiv".to_owned(), r#"{"query":"cat:cs.LG"}"#.to_owned(),),
+                ("arxiv".to_owned(), "{}".to_owned()),
+                ("youtube".to_owned(), "{}".to_owned()),
+            ]
+        );
+        assert_eq!(
+            list_ids_and_configs_for_source_kind(&connection, "arxiv")
+                .expect("arxiv source rows should list"),
+            vec![
+                (first_arxiv.id, "{}".to_owned()),
+                (second_arxiv.id, r#"{"query":"cat:cs.LG"}"#.to_owned(),),
+            ]
+        );
+        assert!(
+            list_ids_and_configs_for_source_kind(&connection, "wikipedia")
+                .expect("missing source kind should list")
+                .is_empty()
+        );
     }
 }

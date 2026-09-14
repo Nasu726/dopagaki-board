@@ -71,7 +71,7 @@ The branch has backend adapters for four real public sources behind the existing
 ### Zenn
 
 - public RSS feeds
-- trend/user/topic style source selection
+- trend/user/topic source selection
 - bounded result count
 
 ### YouTube
@@ -88,57 +88,81 @@ The branch has backend adapters for four real public sources behind the existing
 - no placeholder source is intentionally exposed
 - NHK remains absent
 
-## Latest short checkpoint: Wikipedia frontend complete, final CI pending
+## Latest short checkpoint: Wikipedia, Qiita, and Zenn frontend slices complete
 
-The first substantive #52 CI regression was a stale unit test, not production behavior. Commit `1dd692beaf1f55342bee6269cfe3154907a4cf18` updates `source_validation_only_accepts_live_adapters` so all five real adapters are accepted while `nhk` and unknown kinds remain rejected.
+The first substantive #52 CI regression was a stale unit test, not production behavior. Commit `1dd692beaf1f55342bee6269cfe3154907a4cf18` updates `source_validation_only_accepts_live_adapters` so all five real backend adapters are accepted while `nhk` and unknown kinds remain rejected.
 
-Commit `cc049e673614353f8f7849d93acf35cec1ab9de7` implements the first bounded frontend source slice:
+### Wikipedia
 
-- add picker now exposes `arxiv` and `wikipedia`
-- Wikipedia gets a dedicated widget editor for `language` and `maxResults`
-- source edits go through `update_widget_source_config`; Rust validation/canonicalization remains authoritative
-- Wikipedia gets inherit/OFF/custom per-widget automatic-refresh controls
-- UI explains the backend >= 6 h automatic refresh floor
-- manual refresh is available even when automatic refresh is OFF
-- successful edits update only the affected widget and rehydrate only its source/config identity
-- arXiv was refactored to share the save plumbing without changing its typed UI
+Commit `cc049e673614353f8f7849d93acf35cec1ab9de7` exposes Wikipedia end-to-end:
 
-Validation on that commit reached:
+- add picker exposure
+- typed `language` + `maxResults` editor
+- source edits through `update_widget_source_config`
+- inherit/OFF/custom refresh controls + manual refresh
+- backend >= 6 h automatic refresh floor surfaced in UI
+- narrow source/widget rehydration after save
 
-- Linux frontend build: success
-- Linux rustfmt: success
-- Linux locked dependency check: success
-- Linux Rust tests: success
-- Linux Rust check: success
-- Linux Tauri release build had started when the next presentation fix was committed
-- Windows frontend build: success; Rust tests had started
-- macOS frontend build: success; Rust tests had started
+Commit `e57331ee437cd7220a8bf53483d951bd1c848de1` fixes the Board row layout for sources that may have no thumbnail. Board rows are flex-based so an optional image occupies fixed space while text consumes the remaining/full width.
 
-A presentation review then found a real image/no-image issue in the pre-existing Board row CSS: the fixed two-column grid could leave title content in the narrow first column when no thumbnail existed. Commit `e57331ee437cd7220a8bf53483d951bd1c848de1` switches Board rows to flex layout so an optional 46px image occupies fixed space and text consumes the full remaining width; rows without images use the full row.
+### Qiita
 
-`docs/HANDOFF.md` was then updated in commit `17b5d75681b3e09da4329e824a6ced05bde881b0`. This `ACTIVE_WORK.md` commit creates the newest head again. Therefore **only CI attached to the current PR #52 head counts as final validation**. Do not poll obsolete run IDs or treat intermediate green steps as merge evidence.
+Commit `eba91dc219b9444ce7d3e159b551b4eebb4fe1b2` exposes Qiita:
+
+- add picker exposure
+- typed `query` + `maxResults` editor
+- empty query means recent public items; helper example `tag:Python`
+- query bounded by the adapter contract and `maxResults` 1..25
+- inherit/OFF/custom refresh controls + manual refresh
+- backend >= 1 h automatic refresh floor surfaced in UI
+- arXiv/Qiita share a query-source editor path instead of duplicating the whole form
+
+### Zenn
+
+Commit `cb747115e29a93d5dcd17369c0c6edfe9f84eb92` exposes Zenn:
+
+- add picker exposure
+- typed feed selector: `trend`, `user`, or `topic`
+- trend needs no value; user/topic expose a value field
+- user/topic value is bounded to 80 chars in UI while Rust remains authoritative for the safe-slug rule
+- `maxResults` 1..25
+- inherit/OFF/custom refresh controls + manual refresh
+- backend >= 1 h automatic refresh floor surfaced in UI
+- duplicated per-widget refresh-form construction was extracted into one helper shared by arXiv/Qiita/Wikipedia/Zenn
+
+On `cb747115...`, macOS already passed the frontend production build before this documentation checkpoint and was running Rust tests. Linux/Windows/macOS workflows were all active. Later documentation commits create newer heads, so inspect the current PR head rather than treating that intermediate run as final merge evidence.
+
+## Deliberate YouTube stop point
+
+Do **not** expose YouTube in the add picker yet.
+
+The backend currently implements selected-channel public RSS (`https://www.youtube.com/feeds/videos.xml?channel_id=...`) with:
+
+- `channelId` configuration
+- `maxResults` 1..15
+- thumbnail-first rows via `i.ytimg.com`
+- automatic refresh floor 1 h
+- no YouTube Data API key and therefore no Data API quota consumption
+
+However, `docs/DECISIONS.md` still lists `exact YouTube authentication/quota strategy before exposing that adapter` as an open question, and Issue #48 requires an explicit quota/auth design before YouTube exposure. Treat this as a genuine product-decision gate, not as permission to silently expose the existing RSS implementation.
+
+The decision to settle with the user is whether the public-RSS design itself is the final authentication/quota strategy (no auth, no Data API quota, explicit channel ID supplied by the user) or whether a different authenticated/subscription-based design is required.
 
 ## What is deliberately NOT complete in PR #52 yet
 
 Do not merge #52 yet. Remaining work is:
 
-1. Linux, Windows, and macOS release-build CI green on the current final head
-2. Qiita frontend add/config/manual-refresh slice
-3. Zenn frontend add/config/manual-refresh slice
-4. YouTube frontend add/config/manual-refresh slice
-5. real desktop smoke test of the new source UIs/network presentation when a desktop session is available
-6. final durable documentation/PR-body reconciliation before merge
+1. settle the YouTube authentication/quota strategy and update `docs/DECISIONS.md`
+2. only if public RSS or another concrete strategy is approved, expose YouTube with a typed frontend config/manual-refresh slice
+3. Linux, Windows, and macOS release-build CI green on the final merge candidate
+4. real desktop smoke test of the new source UIs/network presentation when a desktop session is available
+5. final durable documentation/PR-body reconciliation before merge
 
-Wikipedia itself is no longer in the remaining implementation list. Qiita, Zenn, and YouTube intentionally remain hidden from the add picker until their typed configuration UIs exist.
+Wikipedia, Qiita, and Zenn are no longer in the remaining implementation list.
 
 ## Next short batch
 
-1. Inspect CI attached to the current PR #52 head. If a substantive failure exists, fix only that failure first.
-2. If the current head is green through frontend/Rust validation and progressing normally through release builds, begin **Qiita only**:
-   - add Qiita to the add picker
-   - expose `query` + `maxResults` from the actual adapter contract
-   - keep Rust-side normalization/validation authoritative
-   - expose manual refresh and the existing per-widget refresh policy UI
-   - preserve narrow widget-only rehydration after save
-3. Re-run the normal three-platform CI and checkpoint this file before starting Zenn.
-4. Do not implement Qiita, Zenn, and YouTube configuration UIs in one uninterrupted batch.
+1. Inspect CI attached to the current PR #52 head. Fix any substantive regression before expanding scope.
+2. Ask/resolve the YouTube policy gate: whether selected-channel public RSS with no auth/API quota is the intended final strategy.
+3. If approved, record the decision in `docs/DECISIONS.md`, then implement **YouTube only** with `channelId` + `maxResults` and the existing refresh/manual/narrow-rehydration boundaries.
+4. Re-run Linux/Windows/macOS CI, perform available desktop smoke testing, reconcile docs/PR body, and only then consider PR #52 ready for review/merge.

@@ -282,10 +282,14 @@ fn finish_success(
         .map_err(|error| format!("failed to persist refresh success: {error}"))?;
         let has_unseen = db::cache::has_unseen(&transaction)
             .map_err(|error| format!("failed to read unseen cache state: {error}"))?;
-        let widget_sources =
-            db::widgets::list_ids_and_configs_for_source_kind(&transaction, &key.source_kind)
-                .map_err(|error| format!("failed to list widgets after refresh: {error}"))?;
-        let widget_ids = matching_widget_ids(&widget_sources, key);
+        let widget_ids = if changed > 0 {
+            let widget_sources =
+                db::widgets::list_ids_and_configs_for_source_kind(&transaction, &key.source_kind)
+                    .map_err(|error| format!("failed to list widgets after refresh: {error}"))?;
+            matching_widget_ids(&widget_sources, key)
+        } else {
+            Vec::new()
+        };
         transaction
             .commit()
             .map_err(|error| format!("failed to commit cache transaction: {error}"))?;

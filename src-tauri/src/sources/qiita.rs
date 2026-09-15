@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 const DEFAULT_QUERY: &str = "";
-const DEFAULT_MAX_RESULTS: usize = 12;
+const DEFAULT_MAX_RESULTS: usize = 3;
 const MAX_RESULTS: usize = 25;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -140,6 +140,7 @@ mod tests {
     #[test]
     fn config_is_trimmed_sparse_and_bounded() {
         assert_eq!(normalize_config("{}").unwrap(), "{}");
+        assert_eq!(parse_config("{}").unwrap().max_results, 3);
         assert_eq!(
             normalize_config(r#"{"query":"  tag:Rust  ","maxResults":5}"#).unwrap(),
             r#"{"maxResults":5,"query":"tag:Rust"}"#

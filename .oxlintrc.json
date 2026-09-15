@@ -1,0 +1,13 @@
+{
+  "categories": {
+    "correctness": "deny",
+    "suspicious": "deny"
+  },
+  "rules": {
+    "no-useless-escape": ["error", { "allowRegexCharacters": ["/"] }],
+    "unicorn/no-array-sort": ["error", { "allowAfterSpread": true }]
+  },
+  "options": {
+    "denyWarnings": true
+  }
+}

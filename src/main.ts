@@ -362,13 +362,7 @@ function renderBoard(): void {
   });
 
   document.querySelector('[data-action="settings"]')?.addEventListener("click", () => {
-    boardMode = "select";
-    settingsOpen = !settingsOpen;
-    shortcutFormError = null;
-    refreshFormError = null;
-    sourceRefreshFormError = null;
-    addPoint = null;
-    renderBoard();
+    toggleBoardSettings();
   });
 
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-board-mode]")) {
@@ -383,21 +377,7 @@ function renderBoard(): void {
   const canvas = document.querySelector<HTMLElement>(".board-canvas");
   canvas?.addEventListener("pointerdown", handleBoardPointerDown);
 
-  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-add-source]")) {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const sourceKind = button.dataset.addSource;
-      if (boardMode === "add" && sourceKind && addPoint) {
-        void addBoardWidget(sourceKind, addPoint);
-      }
-    });
-  }
-
-  document.querySelector('[data-action="cancel-add"]')?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    setBoardMode("select");
-  });
-
+  bindAddPicker();
   bindSettings();
   bindWidgetInteractions();
   void hydrateBoardWidgets(generation);
@@ -406,6 +386,49 @@ function renderBoard(): void {
     boardLoaded = true;
     void loadBoardWidgets();
   }
+}
+
+function toggleBoardSettings(): void {
+  boardMode = "select";
+  addPoint = null;
+  closeOpenWidgetSettings();
+  document.querySelector(".add-picker")?.remove();
+  applyBoardModeToVisibleUi();
+
+  if (settingsOpen) {
+    closeBoardSettings();
+    return;
+  }
+
+  settingsOpen = true;
+  shortcutFormError = null;
+  refreshFormError = null;
+  sourceRefreshFormError = null;
+  showBoardSettings();
+}
+
+function showBoardSettings(): void {
+  if (!settingsOpen || currentView !== "board") {
+    return;
+  }
+  if (document.querySelector(".settings-popover")) {
+    return;
+  }
+
+  const shell = document.querySelector<HTMLElement>(".board-shell");
+  if (!shell) {
+    return;
+  }
+  shell.insertAdjacentHTML("beforeend", renderSettingsMarkup());
+  bindSettings();
+}
+
+function closeBoardSettings(): void {
+  settingsOpen = false;
+  shortcutFormError = null;
+  refreshFormError = null;
+  sourceRefreshFormError = null;
+  document.querySelector(".settings-popover")?.remove();
 }
 
 function setBoardMode(mode: BoardMode): void {
@@ -623,6 +646,42 @@ function renderAddPickerMarkup(point: GridPoint): string {
   `;
 }
 
+function bindAddPicker(): void {
+  const picker = document.querySelector<HTMLElement>(".add-picker");
+  if (!picker) {
+    return;
+  }
+
+  for (const button of picker.querySelectorAll<HTMLButtonElement>("[data-add-source]")) {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const sourceKind = button.dataset.addSource;
+      if (boardMode === "add" && sourceKind && addPoint) {
+        void addBoardWidget(sourceKind, addPoint);
+      }
+    });
+  }
+
+  picker.querySelector<HTMLButtonElement>('[data-action="cancel-add"]')?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setBoardMode("select");
+  });
+}
+
+function showAddPicker(point: GridPoint): void {
+  if (currentView !== "board" || boardMode !== "add") {
+    return;
+  }
+  const canvas = document.querySelector<HTMLElement>(".board-canvas");
+  if (!canvas) {
+    return;
+  }
+
+  canvas.querySelector(".add-picker")?.remove();
+  canvas.insertAdjacentHTML("beforeend", renderAddPickerMarkup(point));
+  bindAddPicker();
+}
+
 function renderSettingsMarkup(): string {
   return `
     <aside class="settings-popover" aria-label="Settings">
@@ -668,11 +727,7 @@ function bindSettings(): void {
   }
 
   document.querySelector('[data-action="close-settings"]')?.addEventListener("click", () => {
-    settingsOpen = false;
-    shortcutFormError = null;
-    refreshFormError = null;
-    sourceRefreshFormError = null;
-    renderBoard();
+    closeBoardSettings();
   });
 
   const shortcutInput = document.querySelector<HTMLInputElement>("#shortcut-input");
@@ -1109,7 +1164,8 @@ function handleBoardPointerDown(event: PointerEvent): void {
   shortcutFormError = null;
   refreshFormError = null;
   sourceRefreshFormError = null;
-  renderBoard();
+  document.querySelector(".settings-popover")?.remove();
+  showAddPicker(addPoint);
 }
 
 function bindWidgetInteractions(): void {
@@ -1530,15 +1586,10 @@ async function saveGlobalShortcut(shortcut: string): Promise<void> {
   try {
     shellStatus = await invoke<ShellStatus>("set_global_shortcut", { shortcut });
     shortcutFormError = null;
-    if (currentView === "board" && settingsOpen) {
-      renderBoard();
-    }
   } catch (error) {
     shortcutFormError = getErrorMessage(error);
-    if (currentView === "board" && settingsOpen) {
-      renderBoard();
-    }
   }
+  syncVisibleShortcutSettings(true);
 }
 
 async function transitionView(event: ViewEvent): Promise<void> {
@@ -1567,6 +1618,21 @@ async function openContent(url: string): Promise<void> {
   }
 }
 
+function syncVisibleShortcutSettings(forceInputValue: boolean): void {
+  if (currentView !== "board" || !settingsOpen) {
+    return;
+  }
+
+  const input = document.querySelector<HTMLInputElement>("#shortcut-input");
+  const errorElement = document.querySelector<HTMLElement>("#shortcut-error");
+  if (input && (forceInputValue || document.activeElement !== input)) {
+    input.value = shellStatus.globalShortcut;
+  }
+  if (errorElement) {
+    showSettingsError(errorElement, shortcutFormError ?? shellStatus.globalShortcutError);
+  }
+}
+
 function applyShellStatusToVisibleUi(previous: ShellStatus): void {
   if (currentView === "idle") {
     const badge = document.querySelector<HTMLElement>(".idle-orb__badge");
@@ -1584,16 +1650,7 @@ function applyShellStatusToVisibleUi(previous: ShellStatus): void {
     return;
   }
 
-  if (currentView === "board" && settingsOpen) {
-    const input = document.querySelector<HTMLInputElement>("#shortcut-input");
-    const errorElement = document.querySelector<HTMLElement>("#shortcut-error");
-    if (input && document.activeElement !== input) {
-      input.value = shellStatus.globalShortcut;
-    }
-    if (errorElement) {
-      showSettingsError(errorElement, shortcutFormError ?? shellStatus.globalShortcutError);
-    }
-  }
+  syncVisibleShortcutSettings(false);
 }
 
 async function applyCacheChangeToVisibleUi(change: CacheChanged): Promise<void> {

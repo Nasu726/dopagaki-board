@@ -1,3 +1,4 @@
+use super::http::{fetch_text, SourceFetchError};
 use crate::{db::cache::CacheWriteItem, source_config};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -49,26 +50,19 @@ pub(crate) async fn fetch(
     http: &reqwest::Client,
     canonical_source_config_json: &str,
     fetched_at: i64,
-) -> Result<Vec<CacheWriteItem>, String> {
-    let config = parse_config(canonical_source_config_json)?;
-    let endpoint = endpoint(&config)?;
-    let response = http
-        .get(endpoint)
-        .send()
-        .await
-        .map_err(|error| format!("Zenn RSS request failed: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("Zenn returned an error status: {error}"))?;
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("failed to read Zenn RSS: {error}"))?;
+) -> Result<Vec<CacheWriteItem>, SourceFetchError> {
+    let config = parse_config(canonical_source_config_json)
+        .map_err(|error| SourceFetchError::invalid_config("Zenn", error))?;
+    let endpoint =
+        endpoint(&config).map_err(|error| SourceFetchError::invalid_config("Zenn", error))?;
+    let body = fetch_text(http.get(endpoint), "Zenn").await?;
     parse_feed(
         &body,
         config.max_results,
         canonical_source_config_json,
         fetched_at,
     )
+    .map_err(|error| SourceFetchError::decode("Zenn", error))
 }
 
 pub(crate) fn normalize_config(input: &str) -> Result<String, String> {

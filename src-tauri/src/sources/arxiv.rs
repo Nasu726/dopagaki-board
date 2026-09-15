@@ -1,3 +1,4 @@
+use super::http::{fetch_text, SourceFetchError};
 use crate::{db::cache::CacheWriteItem, source_config};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -83,8 +84,9 @@ impl ArxivClient {
         &self,
         canonical_source_config_json: &str,
         fetched_at: i64,
-    ) -> Result<Vec<CacheWriteItem>, String> {
-        let config = parse_config(canonical_source_config_json)?;
+    ) -> Result<Vec<CacheWriteItem>, SourceFetchError> {
+        let config = parse_config(canonical_source_config_json)
+            .map_err(|error| SourceFetchError::invalid_config("arXiv", error))?;
         let max_results = config.max_results.to_string();
 
         // Hold the gate across the request. arXiv asks legacy API clients to use
@@ -99,29 +101,19 @@ impl ArxivClient {
         }
         *gate = Some(Instant::now());
 
-        let response = self
-            .http
-            .get(API_ENDPOINT)
-            .query(&[
-                ("search_query", config.query.as_str()),
-                ("start", "0"),
-                ("max_results", max_results.as_str()),
-                ("sortBy", "submittedDate"),
-                ("sortOrder", "descending"),
-            ])
-            .send()
-            .await
-            .map_err(|error| format!("arXiv request failed: {error}"))?
-            .error_for_status()
-            .map_err(|error| format!("arXiv returned an error status: {error}"))?;
-
-        let body = response
-            .text()
-            .await
-            .map_err(|error| format!("failed to read arXiv response: {error}"))?;
+        let request = self.http.get(API_ENDPOINT).query(&[
+            ("search_query", config.query.as_str()),
+            ("start", "0"),
+            ("max_results", max_results.as_str()),
+            ("sortBy", "submittedDate"),
+            ("sortOrder", "descending"),
+        ]);
+        let body = fetch_text(request, "arXiv").await;
         drop(gate);
+        let body = body?;
 
         parse_feed(&body, canonical_source_config_json, fetched_at)
+            .map_err(|error| SourceFetchError::decode("arXiv", error))
     }
 }
 

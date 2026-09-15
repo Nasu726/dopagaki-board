@@ -278,6 +278,15 @@ impl Scheduler {
     }
 
     pub(crate) fn complete_failure(&mut self, key: &SourceKey, now: i64) {
+        self.complete_failure_with_retry_floor(key, now, None);
+    }
+
+    pub(crate) fn complete_failure_with_retry_floor(
+        &mut self,
+        key: &SourceKey,
+        now: i64,
+        retry_floor_seconds: Option<u64>,
+    ) {
         let Some(state) = self.sources.get_mut(key) else {
             return;
         };
@@ -286,7 +295,10 @@ impl Scheduler {
             self.running_count = self.running_count.saturating_sub(1);
         }
         state.failure_count = state.failure_count.saturating_add(1);
-        let delay = backoff_seconds(state.failure_count);
+        let retry_floor = retry_floor_seconds
+            .map(|seconds| i64::try_from(seconds).unwrap_or(i64::MAX))
+            .unwrap_or(0);
+        let delay = backoff_seconds(state.failure_count).max(retry_floor);
         let retry_at = now.saturating_add(delay);
         state.blocked_until = Some(retry_at);
         state.next_due_at = state.auto_interval_seconds.map(|_| retry_at);
@@ -414,6 +426,24 @@ mod tests {
     }
 
     #[test]
+    fn restored_blocked_source_honors_persisted_deadline() {
+        let mut scheduler = Scheduler::new(1);
+        let source = key("qiita");
+        scheduler.sync_source_with_persisted_state(
+            source.clone(),
+            100,
+            Some(60),
+            Some(80),
+            1,
+            Some(500),
+        );
+        scheduler.mark_due(499);
+        assert_eq!(scheduler.pop_ready(499), None);
+        scheduler.mark_due(500);
+        assert_eq!(scheduler.pop_ready(500), Some(source));
+    }
+
+    #[test]
     fn off_disables_auto_but_manual_refresh_still_runs() {
         let mut scheduler = Scheduler::new(1);
         let source = key("wikipedia");
@@ -493,7 +523,7 @@ mod tests {
     #[test]
     fn blocked_pending_request_exposes_next_wakeup_deadline() {
         let mut scheduler = Scheduler::new(1);
-        let source = key("nhk");
+        let source = key("example");
         scheduler.request_manual(source.clone(), 0);
         assert_eq!(scheduler.pop_ready(0), Some(source.clone()));
         scheduler.complete_failure(&source, 10);
@@ -504,7 +534,7 @@ mod tests {
     #[test]
     fn failure_uses_exponential_backoff_without_tight_retry() {
         let mut scheduler = Scheduler::new(1);
-        let source = key("nhk");
+        let source = key("example");
         scheduler.sync_source(source.clone(), 0, Some(300));
         scheduler.request_manual(source.clone(), 0);
         assert_eq!(scheduler.pop_ready(0), Some(source.clone()));
@@ -516,5 +546,21 @@ mod tests {
         assert_eq!(scheduler.pop_ready(70), Some(source.clone()));
         scheduler.complete_failure(&source, 70);
         assert_eq!(scheduler.blocked_until(&source), Some(190));
+    }
+
+    #[test]
+    fn retry_floor_extends_but_never_shortens_backoff() {
+        let mut scheduler = Scheduler::new(1);
+        let source = key("qiita");
+        scheduler.request_manual(source.clone(), 0);
+        assert_eq!(scheduler.pop_ready(0), Some(source.clone()));
+        scheduler.complete_failure_with_retry_floor(&source, 10, Some(900));
+        assert_eq!(scheduler.blocked_until(&source), Some(910));
+
+        scheduler.request_manual(source.clone(), 11);
+        assert_eq!(scheduler.pop_ready(909), None);
+        assert_eq!(scheduler.pop_ready(910), Some(source.clone()));
+        scheduler.complete_failure_with_retry_floor(&source, 910, Some(30));
+        assert_eq!(scheduler.blocked_until(&source), Some(1030));
     }
 }

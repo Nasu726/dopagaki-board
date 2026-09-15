@@ -10,37 +10,39 @@ Current `main` includes:
 
 - arXiv, Wikipedia, Qiita, Zenn, and selected-channel YouTube RSS adapters
 - cache-first startup and canonical source-instance deduplication
-- source/widget automatic-refresh settings plus manual refresh
+- global/source/widget automatic-refresh controls plus manual refresh, including exact typed custom intervals
 - responsive 12×8 Board geometry and size-aware feed presentation
 - new-widget defaults aligned across TypeScript/Rust: arXiv/Wikipedia/Qiita/Zenn = 3 results, YouTube = 1
-- widget configuration shown on a dedicated Board-level editing surface rather than being constrained by widget size
+- dedicated Board-level widget settings with source-specific editor presentation extracted from `main.ts`
+- explicit Select/Add Board modes; Select is the default and empty-space clicks are harmless outside Add
 - restored native window dragging permission
 - notification-area/system-tray controls and taskbar-free resident behavior
 - shared HTTP failure classification with persisted per-source retry deadlines
+- overlay-only Settings/Add-picker updates that do not rebuild or rehydrate the whole Board
+- frontend build/lint/unit-test gates plus Linux/Windows/macOS release-build CI
 
-Linux, Windows, and macOS release-build CI was green on the final heads of the merged runtime/UI slices. GUI/network behavior that cannot be established by CI remains subject to real-device smoke.
+GUI/network behavior that cannot be established by CI remains subject to real-device smoke.
 
-## Current maintenance batch
+## Current gate before broad feature work
 
-Prioritize the post-source-expansion cleanup before broad feature work:
+The post-source-expansion code/refactor batch is substantially complete. Keep broad feature expansion behind this validation gate:
 
-1. #61 — complete the settings UX with exact typed custom-refresh intervals synchronized with the slider and plain-language refresh status; then smoke the dedicated surface on Windows.
-2. #54 — after the settings UX shape is stable, extract the remaining source-specific editor construction from `src/main.ts` without hiding Tauri/save/rehydrate side effects.
-3. #57 / #63 — finish the durable-doc signal audit and review the batch for avoidable resident/background work before claiming performance changes.
-4. #62 — add explicit Select/Add Board modes after the settings surface is stable.
-5. #53 — optional YouTube Data API enrichment stays behind this maintenance batch; RSS remains the no-key baseline.
+1. #81 — land the reproducible Windows resident-performance measurement helper.
+2. Run one consolidated Windows release-build interaction smoke covering #54/#59/#60/#61/#62/#66/#79.
+3. Run the #63 post-batch resident measurement: Idle/Compact/Board CPU and memory, idle network attribution, and qualitative interaction-under-refresh checks. Record only measured values.
+4. File focused defects for anything found and fix regressions before starting broad expansion.
+5. #53 — optional YouTube Data API enrichment can resume after this gate; RSS remains the no-key baseline.
 
-## Real-device gates still open
+## Windows smoke checklist owners
 
-These Issues have implementation merged and remain open for Windows interaction/visual verification:
+- #59 — Compact/Board window dragging without stealing widget interactions
+- #60 — small/medium/large widget density, image/no-image width, scrolling, and visible 3/1 defaults
+- #54 / #61 — dedicated settings surface, all source editors, YouTube dormant Cancel, exact refresh typing/slider/floors, Save/Cancel/Escape, narrow rehydrate
+- #62 — Select default, harmless empty-space click, Add placement/Cancel/return-to-Select, widget actions inert in Add
+- #66 — fully transparent Idle pixels, notification-area Open Compact/Open Board/Hide/Quit, shortcut/Idle transitions
+- #79 — repeated Settings/Add-picker overlay cycles without duplicate actions or Board disturbance
 
-- #59 — Compact/Board native window dragging and interaction separation
-- #60 — representative small/medium/large widget density, scrolling, and visible confirmation of the 3/1 defaults
-- #66 — fully transparent Idle pixels plus notification-area Open/Hide/Quit and shell regressions
-
-#61 also needs a Windows smoke after its remaining refresh-control work lands.
-
-Record numeric CPU/RSS/network claims only when actually measured. CI green does not substitute for these GUI checks.
+Use #63 as the cross-cutting performance gate rather than creating another umbrella roadmap issue.
 
 ## Working rule
 

@@ -3,5 +3,8 @@
   "identifier": "main-capability",
   "description": "Minimal capability for the bootstrap main window",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging"
+  ]
 }

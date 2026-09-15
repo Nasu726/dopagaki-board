@@ -35,6 +35,12 @@ jobs:
       - name: Frontend build
         run: npm run build
 
+      - name: Frontend lint
+        run: npm run lint
+
+      - name: Frontend tests
+        run: npm test
+
       - name: Verify locked Rust dependencies
         run: cargo metadata --locked --manifest-path src-tauri/Cargo.toml --no-deps --format-version 1 > $null
         shell: pwsh

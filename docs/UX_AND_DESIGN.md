@@ -2,140 +2,93 @@
 
 ## Core visual direction
 
-Use:
-
-- light / white restrained surfaces
-- soft rounded geometry
-- modern but quiet visual language
-- minimal app chrome
-- subtle elevation/separation only when spatially useful
-- content imagery as the main source of visual color
-- fixed safe areas with small padding and large content surfaces
-
-Avoid:
-
-- decorative gradients competing with content
-- excessive glassmorphism
-- card-within-card layouts
-- repeated oversized source headers
-- heavy shadows
-- permanent controls that could appear contextually
-- decorative animation, especially in Idle
+Use light/white restrained surfaces, soft rounded geometry, minimal chrome, subtle separation only where spatially useful, and real content imagery as the main source of color. Avoid decorative gradients competing with content, excessive glassmorphism, card-within-card layouts, repeated oversized headers, heavy shadows, permanent controls that could be contextual, and decorative animation in Idle.
 
 The governing rules are `Content > app decoration` and, where usability is preserved, `Less UI > more UI`.
-
-Real desktop feedback is the current design authority. Figma work is optional and should be used only if a future visual ambiguity benefits from it.
 
 ## Idle
 
 - Circular translucent orb / おはじき.
-- Not a rectangular mini-window and not a circular picture painted onto an opaque square.
-- Window pixels outside the circle are transparent.
-- No content information.
-- Optional small blue update dot at upper-right.
-- Badge is boolean by default, not an unread count.
-- No continuous animation.
-- Keep the resident application off the Windows taskbar.
+- Pixels outside the circle are transparent.
+- No content information or continuous animation.
+- Optional small boolean blue update dot.
+- Keep the resident app off the Windows taskbar.
 
 ## Compact
 
-Compact exists to surface a few temptations immediately.
+Compact surfaces a few temptations immediately.
 
-- Roughly 1–3 items.
-- Only sources represented by current Board widgets are eligible.
-- Default priority follows Board geometry: smaller `y` first, then smaller `x`.
-- The content itself is the click target.
-- No intermediate detail modal.
-- After launching external content, collapse immediately to Idle.
-- Keep app-level headers and controls to the absolute minimum.
-
-For thumbnail-centric future sources, almost the whole Compact item may be imagery. arXiv remains title-centric.
+- Roughly 1–3 items from sources represented by current Board widgets.
+- Default source priority follows Board geometry: smaller `y`, then smaller `x`.
+- The content itself is the click target; no intermediate detail modal.
+- External launch collapses to Idle.
+- Keep app-level headers and controls minimal.
+- Thumbnail-centric sources may devote most of a Compact item to imagery; text-first sources remain legible without images.
 
 ## Board geometry
 
-The free-pixel MVP was revised after the first Windows usability test. The Board is spatial, but spatial freedom is expressed through **arbitrary grid rectangles**, not arbitrary pixels.
+The Board uses responsive **grid rectangles**.
 
-- Responsive virtual grid: 12 columns × 8 rows.
-- Grid lines may remain visually hidden.
-- Widget boundaries always lie on grid lines.
-- Widgets may have different integer widths/heights; this is not a same-size card dashboard.
+- Responsive virtual grid: 12 columns × 8 rows; grid lines may remain invisible.
+- Widget boundaries lie on grid lines and widgets may have different integer sizes.
 - Widgets cannot overlap.
 - Dragging snaps to grid positions.
-- If a drag/resize candidate would collide, keep the last valid rectangle. Do not push or auto-reflow neighbors.
+- A colliding drag/resize candidate is rejected; keep the last valid rectangle and never push neighbors implicitly.
 - Resize from every edge and corner.
-- Widget contents reflow/scroll according to the resulting available area.
-- Click empty space to create at/near the chosen cell; choose the nearest free rectangle if the default size does not fit there.
-- The logical layout scales when the Board window changes size.
-
-This preserves user-authored spatial relationships while eliminating accidental overlap and hard-to-align free pixels.
+- Widget contents scroll/reflow according to available area.
+- Click empty space to add near the chosen cell; use the nearest free default rectangle if necessary.
+- Logical layout scales with Board window size.
 
 ## Custom window chrome
 
-The undecorated Tauri window must still behave like a familiar desktop window.
+The undecorated Tauri window behaves like a familiar desktop window. The toolbar region is draggable; Compact offers collapse-to-Idle and open-Board controls; Board offers collapse-to-Idle and restore-to-Compact controls. Use familiar glyph semantics plus explicit `title`/accessible labels. Application settings belong behind one gear entry.
 
-- Title/quiet toolbar region is draggable.
-- Compact offers minimize-to-Idle and maximize-to-Board controls.
-- Board offers minimize-to-Idle and restore-to-Compact controls.
-- Use familiar glyph semantics and explicit `title`/accessible labels.
-- Application settings are behind one gear button rather than several unrelated toolbar icons.
+## Board add/config flow
 
-## Board add flow
+1. Click empty Board space.
+2. Choose a working source from the anchored picker.
+3. The widget is created in the nearest valid free rectangle.
+4. Sources with useful defaults can work immediately; sources requiring essential setup may open their widget-local editor immediately.
+5. Later configuration remains available from the widget settings control.
 
-Preferred interaction:
-
-1. click empty Board area
-2. small anchored picker appears
-3. choose a **working** source type
-4. provide only source-specific minimum setup
-5. widget appears in the nearest valid free grid rectangle
-
-Do not expose planned-but-unimplemented source types as placeholder widgets.
+YouTube uses the setup-required variant: adding it opens the channel editor. Cancelling keeps the empty/dormant widget so the user can retry without repeating placement.
 
 ## Source presentation
 
 ### arXiv
 
-Title-centric. Show enough cached results to match the source configuration; a small widget may scroll, while a larger widget should reflow into more usable space. Author metadata is useful; fake thumbnails are not.
+Title-centric. A small widget may scroll; a larger widget should use the extra content area. Author metadata is useful.
 
-### YouTube selected/subscribed channel (future)
+### Wikipedia
 
-Thumbnail-first. A minimal mode may be thumbnail only, but only after a real adapter/auth strategy exists.
+Image + title when PageImages provides an image, with a full-width text fallback when it does not.
 
-### YouTube recommendation (future)
+### Qiita
 
-Thumbnail-first. Add metadata only where it materially helps decide whether to click.
+Title/author-oriented public items. Available source imagery may be used, but rendering remains correct without it.
 
-### Qiita / Zenn (future)
+### Zenn
 
-OGP/thumbnail may serve as the entire card when it already contains recognizable title/author information. Provide text fallback if image fetch fails.
+Text-first for the current public RSS implementation because images are not guaranteed by the selected feed path.
 
-### Wikipedia (future)
+### YouTube selected channels
 
-Image + title / daily context.
+Thumbnail-first. The current RSS slice shows selected-channel uploads with derived YouTube thumbnails and channel/author context. A raw `UC...` ID or `/channel/UC...` URL can configure it without API credentials.
 
-NHK is not part of the source plan.
+### YouTube recommendations / richer discovery
+
+Future Data API/OAuth work may broaden candidate collection. Add metadata only where it materially helps the click decision.
 
 ## Refresh interaction
 
-- Every live widget has manual refresh.
-- A click should visibly acknowledge queueing instead of looking inert.
-- Per-widget automatic interval can inherit a source/global default, be disabled, or override it.
-- Application settings define global/source defaults; widget-local settings define exceptions.
-- Source hard rate limits remain authoritative even when UI asks for a shorter interval.
+Every live widget has manual refresh. A click visibly acknowledges queueing. Per-widget automatic refresh can inherit a source/global default, be disabled, or override it; source hard floors/backoff remain authoritative. The settings surface owns global/source defaults, while widget-local settings own exceptions.
 
 ## Global shortcut behavior
 
 Default: `CommandOrControl + Shift + Space`.
 
-Expected transitions:
-
-- Idle -> Compact
-- Compact -> Idle
-- Board -> Idle
-- Hidden -> Compact
-
-Shortcut must be user-configurable because global conflicts cannot be eliminated across all systems/apps. Shortcut configuration belongs in the shared gear/settings surface.
+Expected transitions: Idle -> Compact, Compact -> Idle, Board -> Idle, Hidden -> Compact. The shortcut is configurable because global conflicts cannot be eliminated across systems/apps.
 
 ## Deletion pass
 
-After an interaction becomes usable, remove elements until further removal harms discoverability or control. Do not preserve MVP scaffolding merely because it already exists.
+After an interaction becomes usable, remove elements until further removal harms discoverability or control. Remove MVP scaffolding once it no longer serves a current interaction.

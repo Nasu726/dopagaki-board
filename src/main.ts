@@ -65,6 +65,7 @@ type RefreshSettings = {
 };
 
 type RefreshMode = "inherit" | "off" | "interval";
+type ZennFeedType = "trend" | "user" | "topic";
 
 type SourceRefreshDefault = {
   sourceKind: string;
@@ -92,8 +93,24 @@ type SourceGroup = {
   widgetIds: number[];
 };
 
-type ArxivSourceConfig = {
+type QuerySourceConfig = {
   query: string;
+  maxResults: number;
+};
+
+type WikipediaSourceConfig = {
+  language: string;
+  maxResults: number;
+};
+
+type ZennSourceConfig = {
+  feedType: ZennFeedType;
+  value: string;
+  maxResults: number;
+};
+
+type YouTubeSourceConfig = {
+  channelId: string;
   maxResults: number;
 };
 
@@ -105,7 +122,7 @@ const SOURCE_LABELS: Record<string, string> = {
   zenn: "Zenn",
 };
 
-const ADDABLE_SOURCE_KINDS = ["arxiv"] as const;
+const ADDABLE_SOURCE_KINDS = ["arxiv", "wikipedia", "qiita", "zenn", "youtube"] as const;
 const DEFAULT_GLOBAL_SHORTCUT = "CmdOrCtrl+Shift+Space";
 const COMPACT_CACHE_LIMIT = 3;
 const BOARD_CACHE_LIMIT = 25;
@@ -115,6 +132,14 @@ const MAX_AUTO_REFRESH_SECONDS = 24 * 60 * 60;
 const DEFAULT_AUTO_REFRESH_SECONDS = 60 * 60;
 const DEFAULT_ARXIV_QUERY = "cat:cs.AI";
 const DEFAULT_ARXIV_MAX_RESULTS = 12;
+const DEFAULT_WIKIPEDIA_LANGUAGE = "ja";
+const DEFAULT_WIKIPEDIA_MAX_RESULTS = 12;
+const DEFAULT_QIITA_QUERY = "";
+const DEFAULT_QIITA_MAX_RESULTS = 12;
+const DEFAULT_ZENN_FEED_TYPE: ZennFeedType = "trend";
+const DEFAULT_ZENN_MAX_RESULTS = 12;
+const DEFAULT_YOUTUBE_CHANNEL_ID = "";
+const DEFAULT_YOUTUBE_MAX_RESULTS = 12;
 
 function getAppRoot(): HTMLElement {
   const element = document.querySelector<HTMLElement>("#app");
@@ -389,14 +414,18 @@ function renderBoard(): void {
 
 function renderWidgetMarkup(widget: WidgetLayout): string {
   const label = sourceLabel(widget.sourceKind);
-  const configButton =
-    widget.sourceKind === "arxiv"
-      ? `<button class="board-widget__config" data-config-widget type="button" aria-label="Configure ${label}" title="Widget settings">•••</button>`
-      : "";
-  const refreshButton =
-    widget.sourceKind === "arxiv"
-      ? `<button class="board-widget__refresh" data-refresh-widget type="button" aria-label="Refresh ${label}" title="Refresh now">↻</button>`
-      : "";
+  const configurable =
+    widget.sourceKind === "arxiv" ||
+    widget.sourceKind === "wikipedia" ||
+    widget.sourceKind === "qiita" ||
+    widget.sourceKind === "zenn" ||
+    widget.sourceKind === "youtube";
+  const configButton = configurable
+    ? `<button class="board-widget__config" data-config-widget type="button" aria-label="Configure ${label}" title="Widget settings">•••</button>`
+    : "";
+  const refreshButton = configurable
+    ? `<button class="board-widget__refresh" data-refresh-widget type="button" aria-label="Refresh ${label}" title="Refresh now">↻</button>`
+    : "";
   const handles: ResizeDirection[] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
   const resizeMarkup = handles
     .map(
@@ -980,27 +1009,58 @@ function bindWidgetInteractions(): void {
 
 function openWidgetConfigEditor(element: HTMLElement, id: number): void {
   const widget = boardWidgets.find((item) => item.id === id);
-  if (!widget || widget.sourceKind !== "arxiv") {
+  if (!widget) {
     return;
   }
+  if (widget.sourceKind === "wikipedia") {
+    openWikipediaWidgetConfigEditor(element, widget);
+    return;
+  }
+  if (widget.sourceKind === "zenn") {
+    openZennWidgetConfigEditor(element, widget);
+    return;
+  }
+  if (widget.sourceKind === "youtube") {
+    openYouTubeWidgetConfigEditor(element, widget);
+    return;
+  }
+  if (widget.sourceKind === "arxiv" || widget.sourceKind === "qiita") {
+    openQuerySourceWidgetConfigEditor(element, widget);
+  }
+}
+
+function openQuerySourceWidgetConfigEditor(element: HTMLElement, widget: WidgetLayout): void {
+  const isArxiv = widget.sourceKind === "arxiv";
+  const label = isArxiv ? "arXiv" : "Qiita";
+  const config = isArxiv
+    ? readQuerySourceConfig(
+        widget.sourceConfigJson,
+        DEFAULT_ARXIV_QUERY,
+        DEFAULT_ARXIV_MAX_RESULTS,
+      )
+    : readQuerySourceConfig(
+        widget.sourceConfigJson,
+        DEFAULT_QIITA_QUERY,
+        DEFAULT_QIITA_MAX_RESULTS,
+      );
+  const refreshFloor = isArxiv ? "24 h" : "1 h";
 
   for (const editor of document.querySelectorAll<HTMLElement>("[data-widget-config-editor]")) {
     editor.remove();
   }
 
-  const config = readArxivConfig(widget.sourceConfigJson);
   const refreshConfig = readWidgetRefreshConfig(widget.refreshConfigJson);
   const form = document.createElement("form");
   form.className = "board-widget-config";
   form.dataset.widgetConfigEditor = "";
-  form.setAttribute("aria-label", "arXiv widget settings");
+  form.setAttribute("aria-label", `${label} widget settings`);
   form.addEventListener("pointerdown", (event) => event.stopPropagation());
   form.addEventListener("click", (event) => event.stopPropagation());
 
   const header = document.createElement("div");
   header.className = "board-widget-config__header";
   const title = document.createElement("strong");
-  title.textContent = "arXiv widget";
+  title.textContent = `${label} widget`;
   const close = document.createElement("button");
   close.type = "button";
   close.className = "board-widget-config__close";
@@ -1018,7 +1078,7 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
   queryInput.maxLength = 512;
   queryInput.autocomplete = "off";
   queryInput.spellcheck = false;
-  queryInput.placeholder = DEFAULT_ARXIV_QUERY;
+  queryInput.placeholder = isArxiv ? DEFAULT_ARXIV_QUERY : "tag:Python";
   queryLabel.append(queryCaption, queryInput);
 
   const countLabel = document.createElement("label");
@@ -1035,8 +1095,453 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
 
   const help = document.createElement("p");
   help.className = "board-widget-config__help";
-  help.textContent = 'Example: cat:cs.AI · ti:"graph neural network"';
+  help.textContent = isArxiv
+    ? 'Example: cat:cs.AI · ti:"graph neural network"'
+    : "Leave empty for recent Qiita items. Example: tag:Python.";
 
+  const refreshSection = createWidgetRefreshSection(
+    refreshConfig,
+    `${label} automatic refresh is always clamped to at least ${refreshFloor}. Manual refresh still works while auto is OFF.`,
+  );
+
+  const errorElement = document.createElement("p");
+  errorElement.className = "board-widget-config__error";
+  errorElement.setAttribute("role", "status");
+  errorElement.hidden = true;
+
+  const actions = document.createElement("div");
+  actions.className = "board-widget-config__actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = "Save";
+  actions.append(cancel, submit);
+
+  const dismiss = (): void => form.remove();
+  close.addEventListener("click", dismiss);
+  cancel.addEventListener("click", dismiss);
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismiss();
+    }
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void saveWidgetSettings(
+      widget.id,
+      element,
+      form,
+      JSON.stringify({
+        query: queryInput.value.trim(),
+        maxResults: Number(countInput.value),
+      }),
+      [queryInput, countInput],
+      refreshSection.select,
+      refreshSection.slider,
+      errorElement,
+      submit,
+    );
+  });
+
+  form.append(
+    header,
+    queryLabel,
+    countLabel,
+    help,
+    refreshSection.element,
+    errorElement,
+    actions,
+  );
+  element.append(form);
+  queryInput.focus();
+  queryInput.select();
+}
+
+function openWikipediaWidgetConfigEditor(element: HTMLElement, widget: WidgetLayout): void {
+  for (const editor of document.querySelectorAll<HTMLElement>("[data-widget-config-editor]")) {
+    editor.remove();
+  }
+
+  const config = readWikipediaConfig(widget.sourceConfigJson);
+  const refreshConfig = readWidgetRefreshConfig(widget.refreshConfigJson);
+  const form = document.createElement("form");
+  form.className = "board-widget-config";
+  form.dataset.widgetConfigEditor = "";
+  form.setAttribute("aria-label", "Wikipedia widget settings");
+  form.addEventListener("pointerdown", (event) => event.stopPropagation());
+  form.addEventListener("click", (event) => event.stopPropagation());
+
+  const header = document.createElement("div");
+  header.className = "board-widget-config__header";
+  const title = document.createElement("strong");
+  title.textContent = "Wikipedia widget";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "board-widget-config__close";
+  close.setAttribute("aria-label", "Close widget settings");
+  close.textContent = "×";
+  header.append(title, close);
+
+  const languageLabel = document.createElement("label");
+  languageLabel.className = "board-widget-config__field";
+  const languageCaption = document.createElement("span");
+  languageCaption.textContent = "Language";
+  const languageInput = document.createElement("input");
+  languageInput.type = "text";
+  languageInput.value = config.language;
+  languageInput.minLength = 2;
+  languageInput.maxLength = 16;
+  languageInput.pattern = "[A-Za-z-]{2,16}";
+  languageInput.autocomplete = "off";
+  languageInput.spellcheck = false;
+  languageInput.placeholder = DEFAULT_WIKIPEDIA_LANGUAGE;
+  languageLabel.append(languageCaption, languageInput);
+
+  const countLabel = document.createElement("label");
+  countLabel.className = "board-widget-config__field board-widget-config__field--count";
+  const countCaption = document.createElement("span");
+  countCaption.textContent = "Items";
+  const countInput = document.createElement("input");
+  countInput.type = "number";
+  countInput.min = "1";
+  countInput.max = "25";
+  countInput.step = "1";
+  countInput.value = String(config.maxResults);
+  countLabel.append(countCaption, countInput);
+
+  const help = document.createElement("p");
+  help.className = "board-widget-config__help";
+  help.textContent = "Wikipedia language code, for example ja, en, or de.";
+
+  const refreshSection = createWidgetRefreshSection(
+    refreshConfig,
+    "Wikipedia automatic refresh is always clamped to at least 6 h. Manual refresh still works while auto is OFF.",
+  );
+
+  const errorElement = document.createElement("p");
+  errorElement.className = "board-widget-config__error";
+  errorElement.setAttribute("role", "status");
+  errorElement.hidden = true;
+
+  const actions = document.createElement("div");
+  actions.className = "board-widget-config__actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = "Save";
+  actions.append(cancel, submit);
+
+  const dismiss = (): void => form.remove();
+  close.addEventListener("click", dismiss);
+  cancel.addEventListener("click", dismiss);
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismiss();
+    }
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void saveWidgetSettings(
+      widget.id,
+      element,
+      form,
+      JSON.stringify({
+        language: languageInput.value.trim(),
+        maxResults: Number(countInput.value),
+      }),
+      [languageInput, countInput],
+      refreshSection.select,
+      refreshSection.slider,
+      errorElement,
+      submit,
+    );
+  });
+
+  form.append(
+    header,
+    languageLabel,
+    countLabel,
+    help,
+    refreshSection.element,
+    errorElement,
+    actions,
+  );
+  element.append(form);
+  languageInput.focus();
+  languageInput.select();
+}
+
+function openZennWidgetConfigEditor(element: HTMLElement, widget: WidgetLayout): void {
+  for (const editor of document.querySelectorAll<HTMLElement>("[data-widget-config-editor]")) {
+    editor.remove();
+  }
+
+  const config = readZennConfig(widget.sourceConfigJson);
+  const refreshConfig = readWidgetRefreshConfig(widget.refreshConfigJson);
+  const form = document.createElement("form");
+  form.className = "board-widget-config";
+  form.dataset.widgetConfigEditor = "";
+  form.setAttribute("aria-label", "Zenn widget settings");
+  form.addEventListener("pointerdown", (event) => event.stopPropagation());
+  form.addEventListener("click", (event) => event.stopPropagation());
+
+  const header = document.createElement("div");
+  header.className = "board-widget-config__header";
+  const title = document.createElement("strong");
+  title.textContent = "Zenn widget";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "board-widget-config__close";
+  close.setAttribute("aria-label", "Close widget settings");
+  close.textContent = "×";
+  header.append(title, close);
+
+  const feedTypeLabel = document.createElement("label");
+  feedTypeLabel.className = "board-widget-config__field";
+  const feedTypeCaption = document.createElement("span");
+  feedTypeCaption.textContent = "Feed";
+  const feedTypeSelect = document.createElement("select");
+  feedTypeSelect.append(
+    zennFeedTypeOption("trend", "Trend"),
+    zennFeedTypeOption("user", "User"),
+    zennFeedTypeOption("topic", "Topic"),
+  );
+  feedTypeSelect.value = config.feedType;
+  feedTypeLabel.append(feedTypeCaption, feedTypeSelect);
+
+  const valueLabel = document.createElement("label");
+  valueLabel.className = "board-widget-config__field";
+  const valueCaption = document.createElement("span");
+  const valueInput = document.createElement("input");
+  valueInput.type = "text";
+  valueInput.value = config.value;
+  valueInput.maxLength = 80;
+  valueInput.autocomplete = "off";
+  valueInput.spellcheck = false;
+  valueLabel.append(valueCaption, valueInput);
+
+  const countLabel = document.createElement("label");
+  countLabel.className = "board-widget-config__field board-widget-config__field--count";
+  const countCaption = document.createElement("span");
+  countCaption.textContent = "Items";
+  const countInput = document.createElement("input");
+  countInput.type = "number";
+  countInput.min = "1";
+  countInput.max = "25";
+  countInput.step = "1";
+  countInput.value = String(config.maxResults);
+  countLabel.append(countCaption, countInput);
+
+  const help = document.createElement("p");
+  help.className = "board-widget-config__help";
+  help.textContent = "Trend needs no value. User/topic values may use letters, numbers, '-' or '_'.";
+
+  const syncFeedType = (): void => {
+    const feedType = feedTypeSelect.value as ZennFeedType;
+    const trend = feedType === "trend";
+    valueLabel.hidden = trend;
+    valueInput.disabled = trend;
+    valueCaption.textContent = feedType === "user" ? "User" : "Topic";
+    valueInput.placeholder = feedType === "user" ? "username" : "topic";
+  };
+  syncFeedType();
+  feedTypeSelect.addEventListener("change", syncFeedType);
+
+  const refreshSection = createWidgetRefreshSection(
+    refreshConfig,
+    "Zenn automatic refresh is always clamped to at least 1 h. Manual refresh still works while auto is OFF.",
+  );
+
+  const errorElement = document.createElement("p");
+  errorElement.className = "board-widget-config__error";
+  errorElement.setAttribute("role", "status");
+  errorElement.hidden = true;
+
+  const actions = document.createElement("div");
+  actions.className = "board-widget-config__actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = "Save";
+  actions.append(cancel, submit);
+
+  const dismiss = (): void => form.remove();
+  close.addEventListener("click", dismiss);
+  cancel.addEventListener("click", dismiss);
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismiss();
+    }
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void saveWidgetSettings(
+      widget.id,
+      element,
+      form,
+      JSON.stringify({
+        feedType: feedTypeSelect.value,
+        value: feedTypeSelect.value === "trend" ? "" : valueInput.value.trim(),
+        maxResults: Number(countInput.value),
+      }),
+      [feedTypeSelect, valueInput, countInput],
+      refreshSection.select,
+      refreshSection.slider,
+      errorElement,
+      submit,
+    ).finally(syncFeedType);
+  });
+
+  form.append(
+    header,
+    feedTypeLabel,
+    valueLabel,
+    countLabel,
+    help,
+    refreshSection.element,
+    errorElement,
+    actions,
+  );
+  element.append(form);
+  feedTypeSelect.focus();
+}
+
+function openYouTubeWidgetConfigEditor(element: HTMLElement, widget: WidgetLayout): void {
+  for (const editor of document.querySelectorAll<HTMLElement>("[data-widget-config-editor]")) {
+    editor.remove();
+  }
+
+  const config = readYouTubeConfig(widget.sourceConfigJson);
+  const refreshConfig = readWidgetRefreshConfig(widget.refreshConfigJson);
+  const form = document.createElement("form");
+  form.className = "board-widget-config";
+  form.dataset.widgetConfigEditor = "";
+  form.setAttribute("aria-label", "YouTube widget settings");
+  form.addEventListener("pointerdown", (event) => event.stopPropagation());
+  form.addEventListener("click", (event) => event.stopPropagation());
+
+  const header = document.createElement("div");
+  header.className = "board-widget-config__header";
+  const title = document.createElement("strong");
+  title.textContent = "YouTube widget";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "board-widget-config__close";
+  close.setAttribute("aria-label", "Close widget settings");
+  close.textContent = "×";
+  header.append(title, close);
+
+  const channelLabel = document.createElement("label");
+  channelLabel.className = "board-widget-config__field";
+  const channelCaption = document.createElement("span");
+  channelCaption.textContent = "Channel";
+  const channelInput = document.createElement("input");
+  channelInput.type = "text";
+  channelInput.value = config.channelId;
+  channelInput.maxLength = 256;
+  channelInput.autocomplete = "off";
+  channelInput.spellcheck = false;
+  channelInput.required = true;
+  channelInput.placeholder = "UC... or youtube.com/channel/UC...";
+  channelLabel.append(channelCaption, channelInput);
+
+  const countLabel = document.createElement("label");
+  countLabel.className = "board-widget-config__field board-widget-config__field--count";
+  const countCaption = document.createElement("span");
+  countCaption.textContent = "Items";
+  const countInput = document.createElement("input");
+  countInput.type = "number";
+  countInput.min = "1";
+  countInput.max = "15";
+  countInput.step = "1";
+  countInput.value = String(config.maxResults);
+  countLabel.append(countCaption, countInput);
+
+  const help = document.createElement("p");
+  help.className = "board-widget-config__help";
+  help.textContent = "Paste a UC-prefixed channel ID or a YouTube /channel/UC... URL. Automatic @handle lookup will be added with optional Data API support; RSS itself needs no API key.";
+
+  const refreshSection = createWidgetRefreshSection(
+    refreshConfig,
+    "YouTube RSS automatic refresh is always clamped to at least 1 h. Manual refresh still works while auto is OFF.",
+  );
+
+  const errorElement = document.createElement("p");
+  errorElement.className = "board-widget-config__error";
+  errorElement.setAttribute("role", "status");
+  errorElement.hidden = true;
+
+  const actions = document.createElement("div");
+  actions.className = "board-widget-config__actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = "Save";
+  actions.append(cancel, submit);
+
+  const dismiss = (): void => form.remove();
+  close.addEventListener("click", dismiss);
+  cancel.addEventListener("click", dismiss);
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismiss();
+    }
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const channelId = normalizeYouTubeChannelInput(channelInput.value);
+    if (!channelId) {
+      errorElement.textContent = "Enter a valid UC... channel ID or a YouTube /channel/UC... URL.";
+      errorElement.hidden = false;
+      channelInput.focus();
+      return;
+    }
+    void saveWidgetSettings(
+      widget.id,
+      element,
+      form,
+      JSON.stringify({
+        channelId,
+        maxResults: Number(countInput.value),
+      }),
+      [channelInput, countInput],
+      refreshSection.select,
+      refreshSection.slider,
+      errorElement,
+      submit,
+    );
+  });
+
+  form.append(
+    header,
+    channelLabel,
+    countLabel,
+    help,
+    refreshSection.element,
+    errorElement,
+    actions,
+  );
+  element.append(form);
+  channelInput.focus();
+  channelInput.select();
+}
+
+function createWidgetRefreshSection(
+  refreshConfig: WidgetRefreshConfig,
+  helpText: string,
+): { element: HTMLDivElement; select: HTMLSelectElement; slider: HTMLInputElement } {
   const refreshSection = document.createElement("div");
   refreshSection.className = "board-widget-config__refresh";
   const refreshLabel = document.createElement("label");
@@ -1067,7 +1572,7 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
 
   const refreshHelp = document.createElement("p");
   refreshHelp.className = "board-widget-config__help";
-  refreshHelp.textContent = "arXiv automatic refresh is always clamped to at least 24 h. Manual refresh still works while auto is OFF.";
+  refreshHelp.textContent = helpText;
   refreshSection.append(refreshLabel, refreshRange, refreshHelp);
 
   const syncRefreshControls = (): void => {
@@ -1083,75 +1588,102 @@ function openWidgetConfigEditor(element: HTMLElement, id: number): void {
     );
   });
 
-  const errorElement = document.createElement("p");
-  errorElement.className = "board-widget-config__error";
-  errorElement.setAttribute("role", "status");
-  errorElement.hidden = true;
-
-  const actions = document.createElement("div");
-  actions.className = "board-widget-config__actions";
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.textContent = "Cancel";
-  const submit = document.createElement("button");
-  submit.type = "submit";
-  submit.textContent = "Save";
-  actions.append(cancel, submit);
-
-  const dismiss = (): void => form.remove();
-  close.addEventListener("click", dismiss);
-  cancel.addEventListener("click", dismiss);
-  form.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      dismiss();
-    }
-  });
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void saveWidgetSettings(
-      id,
-      element,
-      form,
-      queryInput,
-      countInput,
-      refreshSelect,
-      refreshSlider,
-      errorElement,
-      submit,
-    );
-  });
-
-  form.append(
-    header,
-    queryLabel,
-    countLabel,
-    help,
-    refreshSection,
-    errorElement,
-    actions,
-  );
-  element.append(form);
-  queryInput.focus();
-  queryInput.select();
+  return { element: refreshSection, select: refreshSelect, slider: refreshSlider };
 }
 
-function readArxivConfig(sourceConfigJson: string): ArxivSourceConfig {
+function zennFeedTypeOption(value: ZennFeedType, label: string): HTMLOptionElement {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+function readQuerySourceConfig(
+  sourceConfigJson: string,
+  defaultQuery: string,
+  defaultMaxResults: number,
+): QuerySourceConfig {
   try {
-    const parsed = JSON.parse(sourceConfigJson) as Partial<ArxivSourceConfig>;
+    const parsed = JSON.parse(sourceConfigJson) as Partial<QuerySourceConfig>;
     return {
-      query: typeof parsed.query === "string" ? parsed.query : DEFAULT_ARXIV_QUERY,
+      query: typeof parsed.query === "string" ? parsed.query : defaultQuery,
       maxResults:
         typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
           ? parsed.maxResults
-          : DEFAULT_ARXIV_MAX_RESULTS,
+          : defaultMaxResults,
     };
   } catch {
     return {
-      query: DEFAULT_ARXIV_QUERY,
-      maxResults: DEFAULT_ARXIV_MAX_RESULTS,
+      query: defaultQuery,
+      maxResults: defaultMaxResults,
     };
   }
+}
+
+function readWikipediaConfig(sourceConfigJson: string): WikipediaSourceConfig {
+  try {
+    const parsed = JSON.parse(sourceConfigJson) as Partial<WikipediaSourceConfig>;
+    return {
+      language:
+        typeof parsed.language === "string" ? parsed.language : DEFAULT_WIKIPEDIA_LANGUAGE,
+      maxResults:
+        typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
+          ? parsed.maxResults
+          : DEFAULT_WIKIPEDIA_MAX_RESULTS,
+    };
+  } catch {
+    return {
+      language: DEFAULT_WIKIPEDIA_LANGUAGE,
+      maxResults: DEFAULT_WIKIPEDIA_MAX_RESULTS,
+    };
+  }
+}
+
+function readZennConfig(sourceConfigJson: string): ZennSourceConfig {
+  try {
+    const parsed = JSON.parse(sourceConfigJson) as Partial<ZennSourceConfig>;
+    const feedType =
+      parsed.feedType === "user" || parsed.feedType === "topic" ? parsed.feedType : DEFAULT_ZENN_FEED_TYPE;
+    return {
+      feedType,
+      value: typeof parsed.value === "string" ? parsed.value : "",
+      maxResults:
+        typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
+          ? parsed.maxResults
+          : DEFAULT_ZENN_MAX_RESULTS,
+    };
+  } catch {
+    return {
+      feedType: DEFAULT_ZENN_FEED_TYPE,
+      value: "",
+      maxResults: DEFAULT_ZENN_MAX_RESULTS,
+    };
+  }
+}
+
+function readYouTubeConfig(sourceConfigJson: string): YouTubeSourceConfig {
+  try {
+    const parsed = JSON.parse(sourceConfigJson) as Partial<YouTubeSourceConfig>;
+    return {
+      channelId:
+        typeof parsed.channelId === "string" ? parsed.channelId : DEFAULT_YOUTUBE_CHANNEL_ID,
+      maxResults:
+        typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
+          ? parsed.maxResults
+          : DEFAULT_YOUTUBE_MAX_RESULTS,
+    };
+  } catch {
+    return {
+      channelId: DEFAULT_YOUTUBE_CHANNEL_ID,
+      maxResults: DEFAULT_YOUTUBE_MAX_RESULTS,
+    };
+  }
+}
+
+function normalizeYouTubeChannelInput(value: string): string | null {
+  const trimmed = value.trim();
+  const match = trimmed.match(/(?:^|\/channel\/)(UC[A-Za-z0-9_-]{18,30})(?:[\/?#]|$)/);
+  return match?.[1] ?? null;
 }
 
 function readWidgetRefreshConfig(refreshConfigJson: string): WidgetRefreshConfig {
@@ -1195,8 +1727,8 @@ async function saveWidgetSettings(
   id: number,
   element: HTMLElement,
   form: HTMLFormElement,
-  queryInput: HTMLInputElement,
-  countInput: HTMLInputElement,
+  sourceConfigJson: string,
+  sourceControls: Array<HTMLInputElement | HTMLSelectElement>,
   refreshSelect: HTMLSelectElement,
   refreshSlider: HTMLInputElement,
   errorElement: HTMLElement,
@@ -1205,8 +1737,9 @@ async function saveWidgetSettings(
   errorElement.hidden = true;
   errorElement.textContent = "";
   submitButton.disabled = true;
-  queryInput.disabled = true;
-  countInput.disabled = true;
+  for (const control of sourceControls) {
+    control.disabled = true;
+  }
   refreshSelect.disabled = true;
   refreshSlider.disabled = true;
   form.setAttribute("aria-busy", "true");
@@ -1215,10 +1748,7 @@ async function saveWidgetSettings(
   try {
     await invoke<WidgetLayout>("update_widget_source_config", {
       id,
-      sourceConfigJson: JSON.stringify({
-        query: queryInput.value.trim(),
-        maxResults: Number(countInput.value),
-      }),
+      sourceConfigJson,
     });
     sourceSaved = true;
 
@@ -1262,8 +1792,9 @@ async function saveWidgetSettings(
   } finally {
     if (form.isConnected) {
       submitButton.disabled = false;
-      queryInput.disabled = false;
-      countInput.disabled = false;
+      for (const control of sourceControls) {
+        control.disabled = false;
+      }
       refreshSelect.disabled = false;
       refreshSlider.disabled = refreshSelect.value !== "interval";
       form.removeAttribute("aria-busy");
@@ -1520,6 +2051,12 @@ async function addBoardWidget(sourceKind: string, point: GridPoint): Promise<voi
     boardWidgets.push(widget);
     addPoint = null;
     renderBoard();
+    if (sourceKind === "youtube") {
+      const element = document.querySelector<HTMLElement>(`[data-widget-id="${widget.id}"]`);
+      if (element) {
+        openWidgetConfigEditor(element, widget.id);
+      }
+    }
   } catch (error) {
     console.error("failed to add widget", error);
   }

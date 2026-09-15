@@ -387,9 +387,11 @@ mod tests {
 
     #[test]
     fn source_validation_only_accepts_live_adapters() {
-        assert!(validate_source_kind("arxiv").is_ok());
-        assert!(validate_source_kind("youtube").is_err());
+        for source_kind in ["arxiv", "wikipedia", "qiita", "zenn", "youtube"] {
+            assert!(validate_source_kind(source_kind).is_ok(), "{source_kind}");
+        }
         assert!(validate_source_kind("nhk").is_err());
+        assert!(validate_source_kind("unknown").is_err());
     }
 
     #[test]

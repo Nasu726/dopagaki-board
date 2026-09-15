@@ -1,6 +1,6 @@
 # Decision log
 
-This file records concise project decisions so later sessions/agents do not silently reopen settled choices.
+This file records concise project decisions that should remain stable across sessions.
 
 ## Confirmed
 
@@ -26,7 +26,7 @@ Use cache-first startup. Never wait for network before showing usable cached UI.
 
 ### Background fetching
 
-Use async I/O and event/deadline-driven scheduling. Do not occupy an OS thread merely waiting for network I/O and do not introduce high-frequency polling.
+Use async I/O and event/deadline-driven scheduling. Background network waiting does not occupy a dedicated OS thread and scheduling does not use high-frequency polling.
 
 ### Refresh
 
@@ -47,9 +47,9 @@ Window size presets are not separate application states. Where the custom chrome
 
 ### Idle
 
-Idle is a tiny circular orb / おはじき with optional blue boolean update dot and no content rendering. The area outside the circle is genuinely transparent; the app should not look like a square window containing a circular picture.
+Idle is a tiny circular orb / おはじき with optional blue boolean update dot and no content rendering. The area outside the circle is genuinely transparent.
 
-The resident window should stay off the Windows taskbar, including while Compact/Board is visible. A global shortcut is the primary recovery path.
+The resident window stays off the Windows taskbar, including while Compact/Board is visible. A global shortcut is the primary recovery path.
 
 ### External navigation
 
@@ -57,62 +57,79 @@ Content opens in one click with no intermediate detail screen.
 
 From Compact, external launch automatically collapses the app back to Idle. From Board, keep Board open.
 
-### Board layout — revised after Windows MVP test
-
-The earlier free-pixel placement decision is superseded by the real-use result from 2026-09-14.
+### Board layout
 
 Board is a **responsive virtual grid**, currently 12 columns × 8 rows. The grid is a geometry model and does not need visible grid lines.
 
 - a widget is a rectangle whose opposite corners lie on grid intersections
-- persisted x/y/width/height are logical integer grid units, not physical pixels
+- persisted x/y/width/height are logical integer grid units
 - widget pixel geometry scales with the Board window
-- widgets can use different integer grid sizes; this is not an equal-card dashboard
+- widgets can use different integer grid sizes
 - dragging snaps the whole widget to grid coordinates
 - every edge and corner is a resize target
 - widget rectangles must not overlap
-- during drag/resize, a colliding candidate is rejected and the widget stays at the last valid geometry; neighbors are never pushed/reflowed implicitly
-- clicking empty Board space still creates a widget at/near that location, using the nearest free rectangle when necessary
+- during drag/resize, a colliding candidate is rejected and the widget stays at the last valid geometry
+- clicking empty Board space creates a widget at/near that location, using the nearest free rectangle when necessary
 - legacy pixel layouts are converted once when loaded and persisted in grid units
 
-The motivation is direct-manipulation predictability: free pixel positioning produced accidental overlap and made alignment harder rather than freer.
+Grid alignment keeps direct manipulation predictable while preserving user-authored spatial layout.
 
 ### Compact priority
 
 Compact contains only sources represented by current Board widgets. Deleting the final widget for a source/config removes that source from Compact immediately even if cache rows remain.
 
-Default source priority follows Board position: top-to-bottom, then left-to-right, with widget id only as a stable tie-breaker. This makes the Board itself the default priority editor without another mandatory settings layer.
+Default source priority follows Board position: top-to-bottom, then left-to-right, with widget id only as a stable tie-breaker. The Board itself therefore acts as the default priority editor.
 
 ### Visual direction
 
-Use a light/white, restrained, rounded, content-first interface with minimal chrome. Figma comparison work is not a prerequisite; real desktop feedback is authoritative for the current phase.
+Use a light/white, restrained, rounded, content-first interface with minimal chrome.
 
 ### Source-specific display and availability
 
-Do not force a universal card format. arXiv is title-centric; image-centric sources should use their real thumbnails/OGP when adapters exist.
+Presentation is source-specific. arXiv is title-centric; image-centric sources use their real thumbnails/OGP when available. The add picker exposes only implemented adapters.
 
-Never expose seeded fake placeholder content as if a source worked. The add picker shows only adapters that are actually implemented. Future adapters can remain documented until they are real.
+### YouTube integration strategy
 
-NHK is removed from the product/source plan by user decision after real-use review. Do not reintroduce it unless that decision is explicitly changed.
+Use **public selected-channel RSS as the baseline transport**, then add YouTube Data API capabilities incrementally.
+
+Current/near-term behavior:
+
+- selected-channel new-video monitoring uses public RSS and remains usable without a Google API key
+- YouTube widgets are configured around a channel ID and bounded result count
+- adding a YouTube widget immediately opens its source configuration
+- cancelling that first configuration keeps the newly created widget so setup can be retried without recreating placement
+- an unconfigured YouTube widget remains dormant rather than being treated as a failed network refresh/backoff condition
+- the UI provides lightweight channel-ID guidance; Data API support adds handle/URL resolution
+- automatic RSS refresh uses the existing source floor and scheduler/cache boundaries
+
+Data API rollout:
+
+- API use is optional and additive; RSS remains the fallback when no API key is configured, quota is exhausted, or the API is unavailable
+- each user supplies their own YouTube Data API key; the desktop application does not ship a shared project key
+- first API uses are high-value/low-frequency operations such as resolving `@handle` to a channel ID, validating channels, enriching visible/cached video metadata, and selectively broadening recommendation candidates
+- API enrichment fetches data only when it is useful to current product behavior
+- recommendation/ranking remains application-owned; candidate sets come from available public/API sources and the app applies its transparent heuristic layer
+- authenticated/private-account features are a later phase; OAuth setup should reduce Google authorization to a few guided clicks and enable features such as subscription-aware discovery
+- credential storage, quota accounting, cache/refresh rules for API-derived data, and OAuth scopes require explicit design before those phases ship
 
 ### Shortcut and settings
 
 Provide a configurable global shortcut. Initial/default binding: `CommandOrControl + Shift + Space`.
 
-Global shortcut and refresh policy belong under one conventional gear/settings surface rather than unrelated top-level icons.
+Global shortcut and refresh policy belong under one conventional gear/settings surface.
 
 ### Lightweightness
 
-Optimization/deletion is part of the recurring development loop, not a final cleanup phase. The first real Windows measurement met the initial resident budget; preserve that behavior while fixing usability.
+Optimization/deletion is part of the recurring development loop. Preserve the measured resident behavior as functionality expands.
 
 ## Open questions
 
-These are deliberately not frozen:
-
 - exact 1/2/3-item Compact visual geometry after more daily use
-- exact YouTube authentication/quota strategy before exposing that adapter
+- exact local storage mechanism for user-supplied API credentials before YouTube Data API support ships
+- exact recommendation candidate-generation mix once YouTube Data API support is available
 - cached-data retention/eviction policy
 - off-screen thumbnail preload depth
 - OS power-saver integration
 - exact native-rewrite thresholds
 
-When one is resolved, append the decision here rather than silently relying on chat context.
+When one is resolved, move it into the confirmed decisions or the appropriate authoritative spec.

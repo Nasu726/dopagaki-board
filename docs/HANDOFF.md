@@ -1,290 +1,131 @@
 # Development handoff
 
-This is the live restart point for long-running development. Keep information here when it would otherwise exist only in chat or local terminal history.
+Durable implementation knowledge for restarting work after a long gap or interrupted agent session. **Do not use this as the primary current-status document.** Read `ACTIVE_WORK.md` and GitHub first for the active branch/PR; read the authoritative specs/decisions for current product behavior.
 
-Last updated: 2026-09-14
+Last reconciled: 2026-09-15.
 
-## Current checkpoint
+## Restart pointer
 
-Merged to `main`:
+At this reconciliation point, `main` is merged through PR #51 and draft PR #52 on `real-source-adapters-clean` contains the five-source expansion (arXiv plus Wikipedia, Qiita, Zenn, and selected-channel YouTube RSS). The implementation portion of #52 is complete; desktop smoke testing is intentionally deferred to the user's next available Windows session. Issue #53 tracks optional YouTube Data API work; #54 tracks a post-#52 frontend maintainability extraction.
 
-- PR #12: free-placement Board
-- PR #16: configurable global shortcut + Rust-owned Idle badge
-- PR #17: Linux Idle performance baseline tooling
-- PR #18: independent Linux / Windows / macOS CI
-- PR #19: cache-first SQLite data layer + deterministic scheduler core
-- PR #22: cache-driven Compact/Board presentation + automatic-refresh slider
-- PR #24: schema-v4 source-scoped cache identity + canonical source configuration
-- PR #26: event/deadline-driven refresh runtime + first real arXiv adapter
-- PR #27: current `src-tauri/Cargo.lock` + `--locked` Rust CI on Linux/Windows/macOS
-- PR #34: first post-runtime deletion/simplification pass
-- PR #40: editable validated arXiv widget source settings + contextual Board editor
-- PR #38: committed frontend lockfile + `npm ci` across Linux/Windows/macOS CI
+This paragraph can age. After any interruption, treat actual GitHub branch/PR/workflow state as authoritative and then read `ACTIVE_WORK.md`.
 
-Issue #5 (cache/scheduler), Issue #15 (Rust lockfile/reproducibility), Issue #21 (runtime/arXiv), Issue #28 (first simplification pass), and Issue #35 (editable arXiv widget source configuration) are complete.
+## Source identity and config boundary
 
-**Functional MVP checkpoint reached.** There is no active product feature branch. Idle / Compact / free-form Board, cached presentation, event-driven refresh, one real arXiv adapter, manual/automatic refresh, and contextual arXiv query/result-count editing are all on `main`, with Linux/Windows/macOS CI green on the merge candidate.
+A source instance is **`(source_kind, canonical source_config_json)`**, never widget id.
 
-This is a first-complete usability checkpoint, not a claim that product validation is finished. The next product-facing work should come from real desktop use: capture the pending Idle CPU/RSS baseline, inspect small/wide/half-screen behavior, and fix observed friction before adding adapters indiscriminately. Figma comparison/mock work is intentionally deferred and is not required for the current direction; revisit it only if real-use feedback exposes a design problem that benefits from a visual exploration step.
+`src-tauri/src/source_config.rs` is the generic JSON canonicalization boundary. Adapter-specific defaults/validation stay in each source adapter. Scheduler keys and source-specific cache reads must use canonical identity; do not create another source-key representation.
 
-Maintenance stream: PR #38 established `package-lock.json` + `npm ci`. The measured cache experiment from old stacked PR #39 was rebuilt cleanly as PR #41 after #38 merged; #39 is superseded. Keep maintenance changes separate from product behavior.
+Widget source config edits go through a Rust/Tauri command. The frontend must not write config directly into SQLite. A successful edit wakes the existing coordinator and rehydrates only the affected widget/source; it does not create a new poller or rebuild the Board.
 
-Accidental duplicate Issues #29–#33 were created during tool setup and immediately closed as not planned.
+Multiple widgets with the same source identity share scheduler/cache work. Refresh policy resolves per widget but collapses to the most eager enabled effective interval for that shared source. See `REFRESH_POLICY.md` for exact semantics/floors.
 
-The repository is public. Standard GitHub-hosted Actions are no longer constrained by the former private-repository monthly minute quota, but CI latency and reproducibility still matter.
+## Runtime locking invariant
 
-## Public repository / ruleset note
-
-The repository visibility changed from private to public on 2026-09-14 after the account approached its private GitHub Actions minute quota.
-
-A ruleset named `main protection` was added by the user. Earlier inspection indicated a broad `~ALL` branch target rather than main-only targeting; if that remains true, deletion/non-fast-forward restrictions may also affect feature branches. Treat actual GitHub ruleset state as authoritative.
-
-## CI working rule
-
-Windows/macOS cold CI can take tens of minutes. Do not spend an active development session continuously polling a slow run.
-
-- let workflows run while independent review/documentation work continues
-- check CI at logical checkpoints and before merge
-- investigate failures; never weaken platform checks to shorten the wait
-- require Linux, Windows, and macOS release-build CI green for merge candidates
-- Rust dependency resolution is reproducible through committed `src-tauri/Cargo.lock` and `--locked` test/check commands
-- frontend dependency resolution is reproducible through committed `package-lock.json` and `npm ci`
-
-An earlier session spent roughly twenty minutes waiting for CI, the stream disconnected, and a restarted instruction stream overlapped when the original later resumed. Inspect actual PR/branch/workflow state before continuing after an interruption.
-
-## Branch hygiene
-
-Prefer `main + one active product or maintenance branch`, with a second branch only for genuinely independent work.
-
-- after a PR is merged or superseded, delete its branch when tooling/rulesets permit
-- do not reuse obsolete branches for unrelated work
-- branch new work from current `main`
-- if an overlapping stream creates duplicate work, inspect actual merged/open PR state before continuing
-- if a branch inherited already-merged unsquashed history, rebuild cleanly rather than leaving a noisy PR
-
-## Cross-platform CI knowledge
-
-The workflows are separate rather than one matrix:
-
-- `.github/workflows/ci.yml` -> `CI / Linux`
-- `.github/workflows/ci-windows.yml` -> `CI / Windows`
-- `.github/workflows/ci-macos.yml` -> `CI macOS`
-
-Each OS validates frontend production build, locked Rust dependency metadata, Rust tests/check, and `npm run tauri build -- --no-bundle --ci`. Linux additionally owns rustfmt and the Linux performance-helper syntax check.
-
-### Windows icon incident
-
-`tauri-build` requires `src-tauri/icons/icon.ico` when generating Windows resources, including during Cargo tests because the build script runs there.
-
-Repository policy:
-
-- canonical visual source: `src-tauri/icons/icon.png`
-- `src-tauri/icons/icon.ico.b64` stores the equivalent Windows ICO as text
-- `scripts/decode_windows_icon.ps1` materializes `src-tauri/icons/icon.ico`
-- Windows CI runs that helper before any Cargo command
-- generated `src-tauri/icons/icon.ico` is ignored by Git
-
-Fresh Windows checkout before direct Cargo commands:
-
-```powershell
-pwsh -File scripts/decode_windows_icon.ps1
-```
-
-CI compile/link/configuration validation is not a substitute for real GUI interaction or installer/signing tests.
-
-## Cache and source identity
-
-Schema v4 makes `feed_items` identity `(source_kind, source_config_json, id)`.
-
-Keep these semantics:
-
-- source-specific rows may repeat the same external item id across different configs
-- Compact/global top results deduplicate identical external ids
-- seen state is intentionally global by external id
-- refreshing an existing cache row preserves its seen state
-- a newly inserted duplicate source row inherits already-seen state if that external id was seen elsewhere
-
-`src-tauri/src/source_config.rs` is the canonical source-config boundary:
-
-- JSON object only, bounded to 16 KiB
-- recursively sort object keys
-- preserve array order
-- compact serialization
-- scheduler keys and source-specific cache reads canonicalize before use
-
-Do not introduce a second source-key representation.
-
-## Widget source configuration
-
-Issue #35 establishes the source-editing boundary. Preserve these rules:
-
-- widget source configuration is updated through an explicit Rust/Tauri command, never by direct frontend DB writes
-- generic JSON shape canonicalization remains in `source_config.rs`; adapter semantics belong in the adapter
-- arXiv defaults normalize sparsely, so `{}` and an explicit default query/count identify the same source and share cache/scheduler work
-- invalid edits must leave the last persisted valid config untouched
-- saving a config wakes the existing event/deadline runtime; it does not create another polling loop
-- Board configuration UI is contextual and widget-local; opening or saving it must not rebuild the whole Board
-- after a successful edit, update the in-memory widget config and rehydrate only that widget from the new source identity; later `cache-changed` events continue the normal narrow update path
-
-The initial editor exposes arXiv `query` and `maxResults` (1..25). Other source kinds must not get placeholder configuration panels until their adapters define real user-facing fields.
-
-## Scheduler + runtime invariants
-
-`src-tauri/src/scheduler.rs` remains pure deterministic decision logic. It must not acquire Tauri, SQLite, HTTP, timer, or wall-clock dependencies.
-
-A source instance is `(source_kind, canonical source_config_json)`, not widget id.
-
-Current scheduler invariants:
-
-- default global auto interval: 1 hour
-- global numeric range: 5 min .. 24 h; `off` disables automatic refresh
-- manual refresh remains possible with auto OFF
-- max concurrent background jobs: 2
-- duplicate requests collapse
-- manual request upgrades queued automatic priority
-- failures back off exponentially from 60 s, capped at 6 h
-- blocked work cannot execute before `blocked_until`
-- persisted success/failure state is restored after restart
-- scheduler exposes its next meaningful wakeup deadline
-
-Automatic-refresh setting decoding/persistence/validation is centralized in `src-tauri/src/refresh_settings.rs`. Do not reintroduce separate copies in command and runtime code.
-
-`src-tauri/src/runtime.rs` owns integration. Central locking invariant:
+`scheduler.rs` stays deterministic and independent from Tauri/SQLite/HTTP/wall-clock calls. `runtime.rs` is the integration layer.
 
 **Never hold the scheduler mutex across SQLite or HTTP I/O.**
 
-Coordinator iteration:
+Coordinator shape is snapshot DB state -> release DB -> briefly synchronize/pop scheduler -> release scheduler -> async HTTP/DB work -> briefly record result -> sleep until `Notify` or the next deadline. Do not replace this with periodic high-frequency polling.
 
-1. snapshot widgets/settings/persisted refresh state under the DB lock
-2. release DB lock
-3. briefly synchronize/pop decisions under scheduler lock
-4. release scheduler lock
-5. run async network work and DB writes
-6. briefly record scheduler success/failure
-7. sleep until a `Notify` wake or the next deadline
-
-Widget add/delete and refresh-setting changes wake the runtime. Geometry-only changes do not. Job completion also wakes it so freed concurrency can be consumed.
-
-## arXiv adapter policy
-
-The first real adapter lives in `src-tauri/src/sources/arxiv.rs`.
-
-Preserve these source-specific constraints:
-
-- legacy API response: Atom
-- `sortBy=submittedDate`, descending
-- one request at a time
-- at least 3 seconds between request starts
-- automatic refresh clamp: 24 h
-- manual refresh can still be requested while automatic refresh is OFF, but respects scheduler backoff and the arXiv request gate
-- no invented ETag/Last-Modified support
-
-Current default config `{}` means arXiv query `cat:cs.AI` with a bounded result count. Stable arXiv cache ids strip version suffixes so `...v2` is the same logical paper as the earlier version.
+Background concurrency is bounded. Widget geometry changes do not wake refresh scheduling; source/refresh changes do.
 
 ## Cache/UI boundary
 
-Startup remains cache-first. `runtime::start` constructs clients/spawns the coordinator after SQLite/cache initialization but does not await network completion.
+Startup is cache-first and network completion is never on the critical path.
 
-- Compact reads only top cached items when visible
-- Board reads only source/config pairs represented by widgets
-- `cache-changed` carries source kind, canonical config, and affected widget ids
-- Compact silently reloads its small feed after a cache change
-- Board rehydrates only affected widget content nodes
-- Idle/Hidden perform no feed DOM/layout/media work
-- shell unseen badge remains Rust-owned
-- never rebuild the whole Board merely because background freshness changed
+`cache-changed` is deliberately narrow: source kind + canonical config + affected widget ids. Compact may reload its small cached feed, but Board refreshes only affected content nodes. Do not replace widget containers or rerender the whole Board on background freshness events; doing so can reset drag/resize/config interactions.
 
-Manual refresh is currently exposed only where an actual adapter exists (arXiv). The button enqueues work; scheduler/backoff/request-gate policy owns actual execution.
+Hidden/Idle do no feed DOM/layout/media work. The unseen badge is Rust-owned shell state.
 
-## Simplification pass #28
+Compact only considers sources represented by current Board widgets. Stale cache from a deleted final widget must not keep that source in Compact. Default source priority is Board spatial order (top-to-bottom, left-to-right).
 
-The first deliberate post-runtime reduction pass targets code that accumulated during bootstrap/runtime bring-up rather than adding another feature.
+## Board geometry invariant
 
-Current changes:
+Board persistence is a responsive logical **12×8 integer grid**. Widgets are integer rectangles, never overlap, and never implicitly push/reflow neighbors. Drag/resize updates the DOM during the gesture and persists geometry once at gesture end; do not write SQLite on every pointer move.
 
-- delete unused `bootstrap_probe` command and its `BootstrapProbe` transport type
-- delete the unused manual `set_unseen` command; unseen state now comes from cache/runtime ownership only
-- remove those commands from Tauri registration
-- centralize auto-refresh setting read/write/validation in `refresh_settings.rs`
-- delete duplicate interval constants/parsing/tests from command/runtime modules
-- correct roadmap and performance-baseline documents that still described a pre-adapter state
+Every edge/corner is a resize handle. A colliding candidate is rejected and the last valid rectangle remains. Legacy pixel layouts were migrated to grid coordinates on load.
 
-The intent is to reduce command surface and policy duplication without changing UI behavior or scheduler/runtime boundaries.
+Board feed rows must work both with and without `image_url`. The current row implementation uses an optional fixed-basis thumbnail plus flexible text; do not reintroduce a layout that reserves an empty image column for text-only sources.
+
+## Source-specific traps worth remembering
+
+### arXiv
+
+The legacy API path is Atom, sorted by submitted date descending. Requests share one serialized adapter gate and request starts are spaced by at least 3 seconds. Stable cache ids strip version suffixes. Do not invent ETag/Last-Modified support. Scheduler backoff and the arXiv request gate solve different problems; preserve both.
+
+### YouTube
+
+Public selected-channel RSS is the no-key baseline. A raw `UC...` ID or `/channel/UC...` URL can configure it. Adding a YouTube widget opens settings immediately; cancelling keeps the dormant widget because creating it is treated as intent to configure later.
+
+Empty YouTube channel config is a valid setup state. The adapter returns an empty result before HTTP, so an unconfigured widget does not hit YouTube or record a refresh failure. Empty configs also canonicalize to the same source identity, so multiple unconfigured widgets do not create one poller each.
+
+Optional Data API work belongs to #53 and uses a user-supplied key; never embed a shared key. RSS remains the fallback. OAuth/subscription-aware discovery is later. Recommendation/ranking stays application-owned rather than pretending an API exposes the user's current YouTube Home feed.
 
 ## Tauri command macro boundary
 
-Keep `#[tauri::command]` functions registered from the module where the macro is defined. Re-exporting commands and registering the re-exported path caused generated command marker symbols to be unresolved in PR #19. Keep paths such as `commands::cache_refresh::get_refresh_settings`.
+Keep `#[tauri::command]` functions registered from the module where the macro is defined. Re-exporting a command and registering the re-exported path previously caused generated command marker symbols to be unresolved (PR #19). Prefer paths such as `commands::cache_refresh::get_refresh_settings`.
 
-## Shortcut / shell status invariants
+## Windows icon build trap
 
-Default shortcut: `CmdOrCtrl+Shift+Space`.
+`tauri-build` requires `src-tauri/icons/icon.ico` while generating Windows resources, including some Cargo commands because the build script runs there.
 
-- persisted key: `shell.global_shortcut`
-- publish/manage `AppState` before OS shortcut registration
-- serialize changes with `AppState.shortcut_change`
-- replacement order: register new -> unregister old -> persist new
-- conflict/parse failure leaves old shortcut intact
-- persistence failure attempts runtime rollback
-- no silent fallback shortcuts
-- shortcut ownership remains Rust-side
+Repository convention:
 
-`ShellStatus` is separate from `ViewState` and owns `has_unseen`, configured shortcut, and shortcut registration error.
+- visual source: `src-tauri/icons/icon.png`
+- committed text representation: `src-tauri/icons/icon.ico.b64`
+- `scripts/decode_windows_icon.ps1` materializes `icon.ico`
+- generated `icon.ico` is ignored
+- Windows CI runs the helper before Cargo/Tauri work
 
-## Board implementation knowledge
+Fresh Windows checkout before direct build if needed:
 
-Board drag/resize mutates DOM during pointer movement and persists geometry once at gesture end. Do not write SQLite on every pointer move.
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\decode_windows_icon.ps1
+```
 
-The frontend remains Vanilla TypeScript. Do not add React/Vue/Svelte, a grid engine, or canvas dependency for current interactions.
+## Global shortcut replacement
 
-Cache hydration must not replace widget containers or reset pointer gestures; update only each widget's content node. Manual-refresh and source-config controls are excluded from the drag-handle pointer path.
+Default: `CmdOrCtrl+Shift+Space`. Shortcut ownership is Rust-side. Replacement is deliberately non-destructive: register new -> unregister old -> persist new. A conflict/parse failure leaves the old shortcut intact; persistence failure should attempt runtime rollback. Do not silently choose fallback shortcuts.
 
 ## Rust temporary-lifetime pitfall
 
-Two prior `E0597` incidents came from tail expressions retaining a temporary longer than expected:
+Two earlier `E0597` incidents came from tail expressions keeping a temporary alive longer than expected (`query_map(...).collect()` relative to a statement, and a tail `match state.shell.lock()` relative to Tauri `State`). For similar errors, first make destruction order explicit with a local binding or terminating semicolon before redesigning ownership.
 
-- PR #12: `query_map(...).collect()` relative to a prepared statement
-- PR #16: tail `match state.shell.lock()` relative to Tauri `State`
+## CI and branch working rule
 
-For this family of error, first make destruction order explicit with a local binding or terminating semicolon before redesigning ownership.
+There are independent Linux, Windows, and macOS workflows. A merge candidate requires all three release-build workflows green. CI compile/link validation is not a substitute for real GUI/network smoke testing.
 
-## Performance baseline status
+Windows/macOS cold CI can take long enough that actively polling it wastes the session. Do independent review/docs work and check at logical gates rather than waiting continuously. A prior session had two overlapping work streams after the client disconnected during a long CI wait; after any interruption, inspect actual GitHub state before acting.
 
-`docs/PERF_BASELINE.md` contains the canonical procedure. The release-build/process-tree tooling landed before the arXiv adapter, but the actual numeric pre-adapter baseline was not captured. Do not fabricate it retroactively.
+Prefer `main + one active product/maintenance branch`. Do not stack unrelated work onto a nearly-finished PR merely because CI or desktop testing is pending. #54 exists specifically so the frontend decomposition can happen after #52 instead of destabilizing the smoke-test candidate.
 
-The first real numeric baseline should be captured from the current release build with no refresh/preload work due. For the cleanest run, use no supported source widget or auto-refresh OFF and ensure no manual/background request is running.
+The repository is public. If branch deletion/non-fast-forward behavior is surprising, inspect the actual ruleset; an earlier `main protection` ruleset appeared broad enough to affect more than `main`.
 
-Canonical Linux command:
+## Performance facts and discipline
 
-```bash
-npm ci
-npm run tauri build
-./src-tauri/target/release/dopagaki-board &
-APP_PID=$!
-python3 scripts/measure_idle_linux.py --pid "$APP_PID" --settle 60 --duration 300 --interval 1 --csv /tmp/dopagaki-idle.csv
-```
+`PERFORMANCE.md` defines budgets; `PERF_BASELINE.md` is the measurement record. Never infer numeric gains from structural cleanup alone.
 
-Real CPU/RSS/network values remain TBD until a desktop session is available.
+First practical Windows Idle observation (2026-09-14): about 109 MB memory, Task Manager 0% CPU, 0 MB/s disk, 0 Mbps network during observation. A separate Board process-tree observation showed app process about 5.3 MB and WebView2 Manager about 120 MB; these are separate samples and must not be added to the 109 MB Idle figure.
 
-## Repository-memory protocol
+The app is intended to stay resident. If nothing useful is due, it should actually do nothing: no high-frequency timers, hidden rendering, media decode, or unnecessary network work.
 
-- settled decisions: `docs/DECISIONS.md`
-- current checkpoint / incidents / next actions: this file
-- architecture: `docs/ARCHITECTURE.md`
-- performance method: `docs/PERFORMANCE.md`
-- measured baselines: `docs/PERF_BASELINE.md`
-- feature acceptance/progress: Issues and PRs
-- agent discipline: `AGENTS.md`
+## Documentation memory protocol
 
-Meta issue: #13.
+- settled choices/open product questions: `DECISIONS.md`
+- current product behavior: `PRODUCT_SPEC.md` / `UX_AND_DESIGN.md`
+- technical boundaries: `ARCHITECTURE.md` / `REFRESH_POLICY.md`
+- current branch/next gate: `ACTIVE_WORK.md` + Issue/PR
+- durable implementation traps/incidents: this file
+- performance policy/results: `PERFORMANCE.md` / `PERF_BASELINE.md`
+- long-running agent discipline: `AGENTS.md`
 
-When reusable knowledge would otherwise exist only in chat, update the appropriate repository document in the same feature batch.
+Keep durable docs focused on current behavior, decisions, and reusable traps. Historical implementation detail belongs in merged Issues/PRs/commits unless it still explains an active constraint or recurring failure mode.
 
 ## Restart checklist
 
-1. Read `AGENTS.md`, `README.md`, this file, and `docs/DECISIONS.md`.
-2. Treat GitHub state as authoritative after an interrupted or overlapping stream; the product MVP checkpoint is PR #40 on `main`.
-3. Inspect parent performance Issue #6 and the maintenance stream (#38 merged; #39 superseded by clean PR #41) before starting new work.
-4. Capture the real release-build Idle baseline when a desktop session is available; do not infer or fabricate the missing pre-adapter numbers.
-5. Use the app on a real desktop at small, wide, and half-screen Board sizes and record concrete friction before broadening scope.
-6. Choose the next adapter deliberately (likely YouTube or Wikipedia) only after that checkpoint, reusing the established scheduler/runtime/cache/source-config boundaries.
-7. Keep Linux/Windows/macOS release-build CI green for every merge candidate.
+1. Read `AGENTS.md`, `README.md`, `DECISIONS.md`, and `ACTIVE_WORK.md`; inspect current GitHub branch/PR/CI state.
+2. Read the specific spec/architecture document relevant to the task rather than assuming this handoff is the latest product definition.
+3. If #52 is still active, its next gate should be evidence (desktop smoke + final-head CI), not more source implementation, unless a concrete defect has been found.
+4. Preserve canonical source identity, narrow UI rehydration, event/deadline scheduling, and the scheduler-lock invariant.
+5. Record a new non-obvious trap here only if it will matter after the current task/PR is gone.

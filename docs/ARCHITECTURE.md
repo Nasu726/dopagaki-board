@@ -1,59 +1,44 @@
 # Architecture
 
-## MVP stack
+## Stack and boundary
 
-- Tauri 2
+Current implementation:
+
+- Tauri 2 desktop shell
 - Rust application core
 - SQLite local persistence/cache
-- WebView frontend as a replaceable MVP presentation layer
+- Vanilla TypeScript/WebView presentation and direct-manipulation UI
 
-A native UI rewrite is not a goal by itself. Consider native Windows/macOS/Linux implementations only after product value is proven and measurements show a meaningful benefit.
+A native rewrite is not a goal by itself. Consider platform-native UIs only if measured resident cost, shell behavior, or OS integration becomes a concrete limitation.
 
-## Responsibility boundary
+The frontend owns rendering, accessibility, widget-local forms, and pointer interaction. Rust owns or mediates source adapters, HTTP/RSS/API access, SQLite, canonical source identity, cache semantics, scheduling/backoff, recommendation/ranking, external launch, and persistent application/shell state.
 
-The frontend should focus on presentation and interaction. Major application logic should live in Rust so the UI layer can be replaced later without rewriting the core.
+## Current module shape
 
-Rust should own or mediate:
-
-- source adapters
-- HTTP / RSS / API fetching
-- SQLite access
-- cache policy
-- deduplication
-- refresh scheduling
-- recommendation/ranking
-- quota/rate-limit/backoff logic
-- thumbnail/preload coordination
-- external link launching
-- application state needed by Idle/Compact/Board
-
-## Current module direction
-
-Keep modules small and flatten them if they become empty wrappers.
+Keep meaningful boundaries, but do not create forwarding-only abstractions.
 
 ```text
 src-tauri/src/
   app/
-    mod.rs
-    state.rs
+  commands/
   db/
-    mod.rs
-    migrations.rs
-    cache.rs
-    refresh_state.rs
   sources/
-    mod.rs
     arxiv.rs
+    wikipedia.rs
+    qiita.rs
+    zenn.rs
+    youtube.rs
+    mod.rs
+  refresh_policy.rs
+  refresh_settings.rs
   runtime.rs
   scheduler.rs
   source_config.rs
-  commands/
-    mod.rs
-    cache_refresh.rs
   lib.rs
+  main.rs
 ```
 
-Do not create abstractions merely because the diagram looks clean.
+The frontend is intentionally framework-free. `src/main.ts` currently owns the small application presentation/state wiring and uses focused helpers such as `board-grid.ts`; split further when a concern has a clear boundary, not merely to satisfy a file-size target.
 
 ## Cache-first startup
 
@@ -61,203 +46,92 @@ Required ordering:
 
 ```text
 application start
-  -> open SQLite/local cache
-  -> render cached data
+  -> open SQLite/cache
+  -> render cached state
   -> UI becomes usable
-  -> start async refresh runtime
-  -> merge successful results into cache
+  -> start async refresh coordinator
+  -> merge successful network results into cache
   -> update only affected visible UI
 ```
 
-Network completion is never on the startup critical path. `runtime::start` may construct clients and spawn tasks during setup, but it must not wait for a network request before the application becomes usable.
-
-Schema v3 introduced `feed_items` and `source_refresh_state`. Schema v4 changes cached-item identity from a globally unique `id` to `(source_kind, source_config_json, id)`, because the same external item can legitimately belong to multiple source/query configurations. The demo cache is seeded exactly once so offline/cache-first UI can be exercised before every adapter exists.
+Network completion is never on the startup critical path. Hidden/Idle perform no feed DOM/media work.
 
 ## SQLite and cache identity
 
-Use SQLite for modest local state and cached content.
+Cached row identity is `(source_kind, canonical source_config_json, external item id)`. The same external item may legitimately appear under multiple source configs.
 
-Minimum data domains:
+Preserve these semantics:
 
-- app settings
-- window/layout state
-- widgets
-- source configuration/groups
-- cached content items
-- shown/seen/clicked interaction state as needed
-- refresh state
-
-`feed_items.payload_json` is an escape hatch for source-specific metadata while common fields remain queryable. Do not immediately normalize every future adapter field into columns.
-
-Cached rows are source-instance scoped. A normalized external item id may therefore appear in several rows when multiple source configurations select the same item. Preserve these semantics:
-
-- row identity: `(source_kind, canonical source_config_json, external item id)`
+- source-specific cache rows may duplicate an external item across configs
 - Compact/global ranking deduplicates identical external item ids
-- seen state is global by external item id, so seeing one copy marks its cached copies seen elsewhere
-- refreshing an existing row preserves its current seen state
-- inserting a new source-scoped duplicate inherits an already-seen state for that external id
+- seen state is global by external item id
+- refreshing an existing row preserves seen state
+- a newly inserted source-scoped duplicate inherits existing seen state for the same external id
+
+`feed_items.payload_json` is the source-specific metadata escape hatch. Do not normalize every future adapter field into permanent columns without a query/use-case reason.
 
 ## Canonical source configuration
 
-`source_config.rs` is the single canonicalization boundary for source config JSON.
+`source_config.rs` is the generic JSON canonicalization boundary: bounded object input, recursively sorted object keys, preserved array order, compact output. Adapter-specific validation/default normalization belongs in each adapter.
 
-- input must be a bounded JSON object
-- object keys are recursively sorted
-- array order is preserved
-- output is compact JSON
-- `SourceKey::new` canonicalizes before scheduler-key construction
-- source-specific cache reads canonicalize before querying SQLite
-- adapter cache writes use the canonical key supplied by the runtime
+A source instance is `(source_kind, canonical source_config_json)`, not widget id. All scheduler/cache lookups must use that representation. Equivalent sparse/default configs should collapse to one identity where the adapter defines equivalence.
 
-Do not compare raw user-entered JSON strings as source identity.
+Source edits flow through Rust commands; the frontend never writes source config directly to SQLite.
 
-## Scheduler model
+## Scheduler and runtime
 
-Use soft deadlines, not exact periodic polling.
+`scheduler.rs` remains deterministic decision logic independent of Tauri, SQLite, HTTP, and wall-clock calls. It owns source deduplication, due times, manual-priority upgrades, bounded concurrency, retry blocking/backoff, and the next meaningful wakeup deadline.
 
-The scheduler core remains deliberately independent from Tauri, SQLite, HTTP, and wall-clock calls. It decides:
+`runtime.rs` integrates scheduler, DB, adapters, and UI events. The coordinator is event/deadline driven:
 
-- source/config deduplication
-- automatic due times
-- manual-priority upgrades
-- bounded concurrency
-- retry blocking/backoff
-- next meaningful wakeup deadline
+1. snapshot active source instances, resolved intervals, and persisted refresh state
+2. briefly synchronize/pop scheduler decisions
+3. release scheduler lock
+4. perform async network and DB work
+5. record success/failure briefly
+6. sleep until `Notify` or the next deadline
 
-A source instance is identified by `(source_kind, canonical source_config_json)`, not widget id. Multiple widgets depending on the same source instance share one refresh job and fan cached results out afterward.
+**Locking invariant:** never hold the scheduler mutex across SQLite or HTTP I/O.
 
-Per source, scheduler state is equivalent to:
+Background concurrency is bounded. Duplicate requests collapse by source identity; widgets sharing one source do not create independent pollers. Geometry-only changes do not wake refresh scheduling. Refresh/config changes do.
 
-- `next_due_at`
-- queued request / priority
-- `running`
-- failure count
-- `blocked_until`
+Exact interval resolution and current adapter floors are documented in `REFRESH_POLICY.md`.
 
-Persisted `last_attempt`, `last_success`, failure count, and `blocked_until` live in SQLite. The runtime restores the decision state after startup so failures and successful refresh deadlines survive process restarts.
+## Source adapter contract
 
-Priority order remains:
+Adapters own source-specific validation, endpoint construction, parsing, stable external ids, and hard policy such as minimum automatic interval/request gates. The runtime provides shared public HTTP infrastructure for the current public adapters.
 
-`User interaction > Visible content > Manual refresh > Due auto refresh > Near-visible preload > Off-screen preload > maintenance`
+Current source paths:
 
-Start with at most two concurrent background refresh jobs. Manual refresh may upgrade an already queued automatic request instead of creating a duplicate. Failures use exponential backoff rather than tight retry; a blocked source also blocks manual execution until the hard retry boundary.
+- arXiv: Atom, submitted-date ordering, stable ids without version suffixes, serialized/spaced legacy API requests
+- Wikipedia: MediaWiki random discovery + PageImages
+- Qiita: public items API with optional query
+- Zenn: public trend/user/topic RSS
+- YouTube: public selected-channel Atom/RSS with stable video-id thumbnails; empty channel config is a dormant setup state and performs no YouTube HTTP request
 
-## Runtime coordinator
+Do not fabricate ETag/Last-Modified support or endpoint capabilities that a source does not document.
 
-`runtime.rs` is the integration layer between pure scheduling decisions, SQLite, adapters, and UI events.
+## YouTube API evolution
 
-It is event/deadline driven:
+RSS remains the no-key baseline. Optional Data API work must stay behind the existing source/runtime/cache boundaries rather than creating a parallel polling subsystem. Users supply their own API key; key absence, API failure, or quota exhaustion should preserve RSS functionality where applicable.
 
-1. snapshot supported widget source instances and persisted refresh state from SQLite
-2. briefly lock the scheduler to synchronize source state, mark due work, and pop ready jobs
-3. release the scheduler lock
-4. perform SQLite/HTTP work asynchronously
-5. briefly reacquire the scheduler lock to record success/failure
-6. sleep until either `Notify` wakes it or the next scheduler deadline arrives
+Initial API usage should be low-frequency and high-value (`@handle` resolution, validation, visible metadata enrichment, bounded candidate discovery). OAuth/subscription-aware discovery is a later layer. Recommendation/ranking remains app-owned and is not modeled as a YouTube Home-feed API.
 
-There is no high-frequency polling loop.
+Credential storage, API-derived cache freshness/retention, quota accounting, and OAuth scopes require explicit decisions before those phases ship.
 
-**Locking invariant:** never hold the scheduler mutex across SQLite or HTTP I/O. This avoids scheduler/DB lock inversion and prevents foreground commands from waiting behind network latency.
+## UI update boundary
 
-Widget add/delete and refresh-setting changes wake the coordinator. Geometry-only changes do not. Completion also wakes it so newly available concurrency can be consumed immediately.
+Successful cache writes emit a narrow `cache-changed` event with source kind, canonical config, and affected widget ids.
 
-## Adapter contract direction
-
-Adapters may expose policy such as:
-
-- minimum automatic refresh interval
-- manual cooldown / hard request gate
-- budget/quota hints
-- retry-after
-- whether conditional HTTP is actually supported
-
-Use conditional HTTP only where the endpoint documents/supports it. Do not invent validators.
-
-### arXiv adapter
-
-The first real adapter is arXiv, implemented as async HTTP + Atom parsing.
-
-Current policy:
-
-- automatic arXiv refresh is clamped to at least 24 hours
-- manual refresh remains available when automatic refresh is OFF
-- all legacy-API requests share one serialized gate
-- request starts are spaced by at least 3 seconds
-- results are sorted by submitted date descending
-- the adapter stores stable arXiv ids without version suffixes so later versions of the same paper remain one logical item
-- title/author/category/summary metadata is normalized into the common cache plus `payload_json`
-- no ETag/Last-Modified behavior is fabricated
-
-The request gate is separate from scheduler backoff: the scheduler prevents tight retries after failures, while the adapter gate enforces arXiv-specific request serialization/rate spacing.
-
-## Refresh interval
-
-- Default global target: 1 hour.
-- User control: slider.
-- OFF supported.
-- Manual refresh remains available when OFF.
-- Normal global maximum: 24 hours.
-- Source-specific minimums clamp the effective interval; arXiv currently clamps to 24 hours.
-
-Persist the global automatic interval in `settings` under `refresh.auto_interval_seconds`; `off` means disabled. Absence means the default one hour. Current accepted numeric range is 5 minutes through 24 hours.
-
-## Cache-change UI events
-
-Successful runtime writes emit a narrow `cache-changed` event containing the source kind, canonical config, and affected widget ids.
-
-Presentation rules:
-
-- Hidden/Idle: do not render feed DOM or decode media
-- Compact: reload the small top-cache surface without forcing a whole application render
+- Hidden/Idle: no feed rendering/media decode
+- Compact: reload only the small cached surface
 - Board: rehydrate only affected widget content nodes
-- never rebuild the whole Board because a background refresh completed; active drag/resize/settings interactions must survive
+- never rebuild the whole Board because a background refresh completed
 
-The Rust-owned `ShellStatus.has_unseen` remains the only badge source of truth.
-
-## Thumbnail/media loading
-
-- visible media: highest media priority
-- near-visible: low-priority preload
-- far off-screen: preload only while idle if later justified
-- any preload must yield when foreground work appears
-- Idle renders/decodes no content media
-
-## State transitions
-
-Four actual states:
-
-- Hidden
-- Idle
-- Compact
-- Board
-
-Size presets belong to layout/display logic, not the state machine.
-
-Compact external launch collapses to Idle. Board external launch keeps Board open.
-
-## Shell status vs. view state
-
-Do not expand `ViewState` with unrelated runtime flags. Window/navigation state and shell status have different lifecycles.
-
-Rust-owned shell status contains:
-
-- boolean unseen/update indicator
-- configured global shortcut
-- active shortcut registration error
-
-Global shortcut configuration is persisted in SQLite. Replacement must be non-destructive: register the requested new binding before removing the known-working old binding, persist only after the runtime swap succeeds, and do not silently try fallback shortcuts.
+Cache hydration must not reset drag/resize/config interactions. Board feed rendering must work with or without images.
 
 ## Board persistence
 
-Persist at least:
+Persist widget source/config, logical 12×8-grid rectangle, display mode/preset if used, and refresh configuration. Drag/resize mutates presentation during the gesture and persists geometry once at gesture end; do not write SQLite on every pointer move.
 
-- widget id
-- source/type
-- source/group config
-- x/y position
-- width/height
-- display preset/mode
-- refresh configuration
-- z/order only if it becomes necessary
-
-Board drag/resize updates the DOM during pointer movement and persists geometry at gesture end. Keep feed hydration separate from geometry persistence and update only the widget content node.
+Compact source priority is derived from active Board spatial order. Deleting the final widget for a source/config immediately removes that source from Compact eligibility even if cache rows remain.

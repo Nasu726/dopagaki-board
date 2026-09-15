@@ -62,6 +62,7 @@ pub(crate) fn effective_auto_interval(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::refresh_policy::{MAX_AUTO_REFRESH_SECONDS, MIN_AUTO_REFRESH_SECONDS};
 
     #[test]
     fn supported_kinds_only_expose_real_adapters() {
@@ -127,5 +128,37 @@ mod tests {
             effective_auto_interval("youtube", Some(5 * 60)),
             Some(YOUTUBE_AUTO_REFRESH_SECONDS)
         );
+    }
+
+    #[test]
+    fn frontend_refresh_policy_mirror_matches_rust_values() {
+        let frontend = include_str!("../../../src/refresh-controls.ts");
+        let expected = [
+            (
+                "export const MIN_AUTO_REFRESH_SECONDS",
+                MIN_AUTO_REFRESH_SECONDS,
+            ),
+            (
+                "export const MAX_AUTO_REFRESH_SECONDS",
+                MAX_AUTO_REFRESH_SECONDS,
+            ),
+            ("arxiv", ARXIV_AUTO_REFRESH_SECONDS),
+            ("wikipedia", WIKIPEDIA_AUTO_REFRESH_SECONDS),
+            ("qiita", QIITA_AUTO_REFRESH_SECONDS),
+            ("zenn", ZENN_AUTO_REFRESH_SECONDS),
+            ("youtube", YOUTUBE_AUTO_REFRESH_SECONDS),
+        ];
+
+        for (name, seconds) in expected {
+            let needle = if name.starts_with("export const") {
+                format!("{name} = {seconds};")
+            } else {
+                format!("{name}: {seconds},")
+            };
+            assert!(
+                frontend.contains(&needle),
+                "frontend refresh policy mirror is missing `{needle}`"
+            );
+        }
     }
 }

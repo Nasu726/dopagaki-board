@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "npx --yes oxlint@1.83.0 src",
-    "test": "node --test --experimental-strip-types src/board-grid.test.mjs src/source-config.test.mjs",
+    "test": "node --test --experimental-strip-types src/board-grid.test.mjs src/source-config.test.mjs src/refresh-controls.test.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

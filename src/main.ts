@@ -19,10 +19,15 @@ import {
 } from "./board-grid";
 import {
   DEFAULT_AUTO_REFRESH_SECONDS,
+  MAX_AUTO_REFRESH_SECONDS,
+  MIN_AUTO_REFRESH_SECONDS,
   REFRESH_SLIDER_MAX,
   formatRefreshInterval,
+  normalizeRefreshSeconds,
+  refreshMinutesToSeconds,
   secondsToSliderPosition,
   sliderPositionToSeconds,
+  sourceAutoRefreshFloorSeconds,
 } from "./refresh-controls";
 import {
   closeOpenWidgetSettings,
@@ -32,6 +37,7 @@ import {
 import "./styles.css";
 import "./cache-ui.css";
 import "./board-mode.css";
+import "./refresh-settings-exact.css";
 
 type ViewState = "hidden" | "idle" | "compact" | "board";
 type ViewEvent =
@@ -634,18 +640,22 @@ function renderSettingsMarkup(): string {
         </div>
       </form>
       <section class="settings-section" aria-label="Automatic refresh">
-        <label for="refresh-interval">Global automatic refresh fallback</label>
-        <div class="settings-range-row">
+        <label for="refresh-interval">Default automatic refresh</label>
+        <div class="settings-range-row settings-range-row--exact">
           <input id="refresh-interval" type="range" min="0" max="${REFRESH_SLIDER_MAX}" step="1">
-          <output id="refresh-interval-output" for="refresh-interval">Loading…</output>
+          <label class="settings-exact-minutes" for="refresh-minutes">
+            <input id="refresh-minutes" type="number" min="${MIN_AUTO_REFRESH_SECONDS / 60}" max="${MAX_AUTO_REFRESH_SECONDS / 60}" step="1" inputmode="numeric" aria-label="Default automatic refresh in minutes">
+            <span>min</span>
+          </label>
+          <output id="refresh-interval-output" for="refresh-interval refresh-minutes">Loading…</output>
         </div>
-        <p>Left edge is OFF. Source settings may use this value or choose their own.</p>
+        <p>Use the slider or enter exact minutes. Move the slider to the left edge to turn automatic refresh off.</p>
         <p id="refresh-error" class="settings-error" hidden></p>
       </section>
       <section class="settings-section" aria-label="Source refresh defaults">
         <label>Source refresh</label>
         <div id="source-refresh-defaults" class="settings-source-list" aria-live="polite">Loading…</div>
-        <p>Each widget can use its source setting, turn automatic refresh off, or choose its own interval. Source minimum intervals still apply.</p>
+        <p>Each source can use the default, turn automatic refresh off, or choose an exact interval. Source minimum intervals still apply.</p>
         <p id="source-refresh-error" class="settings-error" hidden></p>
       </section>
     </aside>
@@ -678,23 +688,68 @@ function bindSettings(): void {
   }
 
   const slider = document.querySelector<HTMLInputElement>("#refresh-interval");
+  const minutesInput = document.querySelector<HTMLInputElement>("#refresh-minutes");
   const output = document.querySelector<HTMLOutputElement>("#refresh-interval-output");
   const refreshError = document.querySelector<HTMLElement>("#refresh-error");
-  if (slider && output && refreshError) {
+  if (slider && minutesInput && output && refreshError) {
     slider.addEventListener("input", () => {
-      output.value = formatRefreshInterval(sliderPositionToSeconds(Number(slider.value)));
+      const seconds = sliderPositionToSeconds(Number(slider.value));
+      setRefreshExactDisplay(minutesInput, output, seconds);
     });
     slider.addEventListener("change", () => {
-      void saveAutoRefreshInterval(Number(slider.value), slider, output, refreshError);
+      void saveAutoRefreshInterval(
+        sliderPositionToSeconds(Number(slider.value)),
+        slider,
+        minutesInput,
+        output,
+        refreshError,
+      );
+    });
+    minutesInput.addEventListener("input", () => {
+      if (minutesInput.value === "") {
+        return;
+      }
+      const minutes = Number(minutesInput.value);
+      if (!Number.isFinite(minutes)) {
+        return;
+      }
+      const seconds = refreshMinutesToSeconds(minutes, MIN_AUTO_REFRESH_SECONDS);
+      slider.value = String(secondsToSliderPosition(seconds));
+      output.value = formatRefreshInterval(seconds);
+    });
+    minutesInput.addEventListener("change", () => {
+      if (minutesInput.value === "") {
+        setRefreshControls(
+          slider,
+          minutesInput,
+          output,
+          refreshSettings?.autoIntervalSeconds ?? null,
+        );
+        return;
+      }
+      const minutes = Number(minutesInput.value);
+      if (!Number.isFinite(minutes)) {
+        setRefreshControls(
+          slider,
+          minutesInput,
+          output,
+          refreshSettings?.autoIntervalSeconds ?? null,
+        );
+        return;
+      }
+      const seconds = refreshMinutesToSeconds(minutes, MIN_AUTO_REFRESH_SECONDS);
+      setRefreshControls(slider, minutesInput, output, seconds);
+      void saveAutoRefreshInterval(seconds, slider, minutesInput, output, refreshError);
     });
 
     if (refreshSettings) {
-      setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
+      setRefreshControls(slider, minutesInput, output, refreshSettings.autoIntervalSeconds);
       showSettingsError(refreshError, refreshFormError);
     } else {
       slider.disabled = true;
+      minutesInput.disabled = true;
       output.value = "Loading…";
-      void loadRefreshSettings(slider, output, refreshError);
+      void loadRefreshSettings(slider, minutesInput, output, refreshError);
     }
   }
 
@@ -703,6 +758,7 @@ function bindSettings(): void {
 
 async function loadRefreshSettings(
   slider: HTMLInputElement,
+  minutesInput: HTMLInputElement,
   output: HTMLOutputElement,
   errorElement: HTMLElement,
 ): Promise<void> {
@@ -711,12 +767,14 @@ async function loadRefreshSettings(
     if (!settingsOpen || !slider.isConnected) {
       return;
     }
-    setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
+    setRefreshControls(slider, minutesInput, output, refreshSettings.autoIntervalSeconds);
     slider.disabled = false;
+    minutesInput.disabled = false;
     showSettingsError(errorElement, refreshFormError);
   } catch (error) {
     if (settingsOpen && slider.isConnected) {
       slider.disabled = true;
+      minutesInput.disabled = true;
       output.value = "Unavailable";
       showSettingsError(errorElement, getErrorMessage(error));
     }
@@ -725,13 +783,14 @@ async function loadRefreshSettings(
 }
 
 async function saveAutoRefreshInterval(
-  sliderPosition: number,
+  autoIntervalSeconds: number | null,
   slider: HTMLInputElement,
+  minutesInput: HTMLInputElement,
   output: HTMLOutputElement,
   errorElement: HTMLElement,
 ): Promise<void> {
-  const autoIntervalSeconds = sliderPositionToSeconds(sliderPosition);
   slider.disabled = true;
+  minutesInput.disabled = true;
   refreshFormError = null;
   showSettingsError(errorElement, null);
 
@@ -741,7 +800,7 @@ async function saveAutoRefreshInterval(
     });
     sourceRefreshDefaults = null;
     if (settingsOpen && slider.isConnected) {
-      setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
+      setRefreshControls(slider, minutesInput, output, refreshSettings.autoIntervalSeconds);
       bindSourceRefreshDefaults();
     }
   } catch (error) {
@@ -749,13 +808,14 @@ async function saveAutoRefreshInterval(
     if (settingsOpen && slider.isConnected) {
       showSettingsError(errorElement, refreshFormError);
       if (refreshSettings) {
-        setRefreshControls(slider, output, refreshSettings.autoIntervalSeconds);
+        setRefreshControls(slider, minutesInput, output, refreshSettings.autoIntervalSeconds);
       }
     }
     console.error("failed to save refresh interval", error);
   } finally {
     if (settingsOpen && slider.isConnected) {
       slider.disabled = false;
+      minutesInput.disabled = false;
     }
   }
 }
@@ -826,51 +886,132 @@ function renderSourceRefreshDefaults(
     const select = document.createElement("select");
     select.setAttribute("aria-label", `${sourceLabel(source.sourceKind)} refresh default`);
     select.append(
-      refreshModeOption("inherit", "Use global setting"),
+      refreshModeOption("inherit", "Use default setting"),
       refreshModeOption("off", "OFF"),
       refreshModeOption("interval", "Custom"),
     );
     select.value = source.mode;
 
+    const minimumSeconds = sourceAutoRefreshFloorSeconds(source.sourceKind);
     const rangeRow = document.createElement("div");
-    rangeRow.className = "settings-range-row settings-source-row__range";
+    rangeRow.className = "settings-range-row settings-range-row--exact settings-source-row__range";
     const slider = document.createElement("input");
     slider.type = "range";
-    slider.min = "1";
+    slider.min = String(Math.max(1, secondsToSliderPosition(minimumSeconds)));
     slider.max = String(REFRESH_SLIDER_MAX);
     slider.step = "1";
-    const startingSeconds =
-      source.autoIntervalSeconds ?? refreshSettings?.autoIntervalSeconds ?? DEFAULT_AUTO_REFRESH_SECONDS;
-    slider.value = String(Math.max(1, secondsToSliderPosition(startingSeconds)));
+    const startingSeconds = normalizeRefreshSeconds(
+      source.autoIntervalSeconds ?? refreshSettings?.autoIntervalSeconds ?? DEFAULT_AUTO_REFRESH_SECONDS,
+      minimumSeconds,
+    );
+
+    const minutesLabel = document.createElement("label");
+    minutesLabel.className = "settings-exact-minutes";
+    const minutesInput = document.createElement("input");
+    minutesInput.type = "number";
+    minutesInput.min = String(Math.ceil(minimumSeconds / 60));
+    minutesInput.max = String(Math.floor(MAX_AUTO_REFRESH_SECONDS / 60));
+    minutesInput.step = "1";
+    minutesInput.inputMode = "numeric";
+    minutesInput.setAttribute(
+      "aria-label",
+      `${sourceLabel(source.sourceKind)} refresh interval in minutes`,
+    );
+    const minutesUnit = document.createElement("span");
+    minutesUnit.textContent = "min";
+    minutesLabel.append(minutesInput, minutesUnit);
+
     const output = document.createElement("output");
-    output.value = formatRefreshInterval(startingSeconds);
-    rangeRow.append(slider, output);
+    rangeRow.append(slider, minutesLabel, output);
+
+    const syncFromSeconds = (seconds: number): number => {
+      const normalized = normalizeRefreshSeconds(seconds, minimumSeconds);
+      slider.value = String(
+        Math.max(Number(slider.min), secondsToSliderPosition(normalized)),
+      );
+      minutesInput.value = String(Math.round(normalized / 60));
+      output.value = formatRefreshInterval(normalized);
+      return normalized;
+    };
 
     const syncVisibility = (): void => {
-      rangeRow.hidden = select.value !== "interval";
+      const custom = select.value === "interval";
+      rangeRow.hidden = !custom;
+      slider.disabled = !custom;
+      minutesInput.disabled = !custom;
     };
+    syncFromSeconds(startingSeconds);
     syncVisibility();
 
     slider.addEventListener("input", () => {
-      output.value = formatRefreshInterval(sliderPositionToSeconds(Number(slider.value)));
+      const seconds = sliderPositionToSeconds(Number(slider.value)) ?? minimumSeconds;
+      const normalized = normalizeRefreshSeconds(seconds, minimumSeconds);
+      minutesInput.value = String(Math.round(normalized / 60));
+      output.value = formatRefreshInterval(normalized);
+    });
+    slider.addEventListener("change", () => {
+      if (select.value === "interval") {
+        const seconds = syncFromSeconds(
+          sliderPositionToSeconds(Number(slider.value)) ?? minimumSeconds,
+        );
+        void saveSourceRefreshDefault(
+          source.sourceKind,
+          "interval",
+          seconds,
+          select,
+          slider,
+          minutesInput,
+        );
+      }
+    });
+    minutesInput.addEventListener("input", () => {
+      if (minutesInput.value === "") {
+        return;
+      }
+      const minutes = Number(minutesInput.value);
+      if (!Number.isFinite(minutes)) {
+        return;
+      }
+      const seconds = refreshMinutesToSeconds(minutes, minimumSeconds);
+      slider.value = String(
+        Math.max(Number(slider.min), secondsToSliderPosition(seconds)),
+      );
+      output.value = formatRefreshInterval(seconds);
+    });
+    minutesInput.addEventListener("change", () => {
+      if (select.value !== "interval") {
+        return;
+      }
+      if (minutesInput.value === "" || !Number.isFinite(Number(minutesInput.value))) {
+        syncFromSeconds(startingSeconds);
+        return;
+      }
+      const seconds = syncFromSeconds(
+        refreshMinutesToSeconds(Number(minutesInput.value), minimumSeconds),
+      );
+      void saveSourceRefreshDefault(
+        source.sourceKind,
+        "interval",
+        seconds,
+        select,
+        slider,
+        minutesInput,
+      );
     });
     select.addEventListener("change", () => {
       syncVisibility();
       const mode = select.value as RefreshMode;
-      const seconds =
-        mode === "interval" ? sliderPositionToSeconds(Number(slider.value)) : null;
-      void saveSourceRefreshDefault(source.sourceKind, mode, seconds, select, slider);
-    });
-    slider.addEventListener("change", () => {
-      if (select.value === "interval") {
-        void saveSourceRefreshDefault(
-          source.sourceKind,
-          "interval",
-          sliderPositionToSeconds(Number(slider.value)),
-          select,
-          slider,
-        );
-      }
+      const seconds = mode === "interval"
+        ? syncFromSeconds(refreshMinutesToSeconds(Number(minutesInput.value), minimumSeconds))
+        : null;
+      void saveSourceRefreshDefault(
+        source.sourceKind,
+        mode,
+        seconds,
+        select,
+        slider,
+        minutesInput,
+      );
     });
 
     row.append(heading, select, rangeRow);
@@ -884,10 +1025,12 @@ async function saveSourceRefreshDefault(
   autoIntervalSeconds: number | null,
   select: HTMLSelectElement,
   slider: HTMLInputElement,
+  minutesInput: HTMLInputElement,
 ): Promise<void> {
   const errorElement = document.querySelector<HTMLElement>("#source-refresh-error");
   select.disabled = true;
   slider.disabled = true;
+  minutesInput.disabled = true;
   sourceRefreshFormError = null;
   if (errorElement) {
     showSettingsError(errorElement, null);
@@ -916,7 +1059,9 @@ async function saveSourceRefreshDefault(
   } finally {
     if (select.isConnected) {
       select.disabled = false;
-      slider.disabled = false;
+      const custom = select.value === "interval";
+      slider.disabled = !custom;
+      minutesInput.disabled = !custom;
     }
   }
 }
@@ -928,13 +1073,24 @@ function refreshModeOption(value: RefreshMode, label: string): HTMLOptionElement
   return option;
 }
 
+function setRefreshExactDisplay(
+  minutesInput: HTMLInputElement,
+  output: HTMLOutputElement,
+  seconds: number | null,
+): void {
+  minutesInput.value = seconds === null ? "" : String(Math.round(seconds / 60));
+  minutesInput.placeholder = seconds === null ? "OFF" : "";
+  output.value = formatRefreshInterval(seconds);
+}
+
 function setRefreshControls(
   slider: HTMLInputElement,
+  minutesInput: HTMLInputElement,
   output: HTMLOutputElement,
   seconds: number | null,
 ): void {
   slider.value = String(secondsToSliderPosition(seconds));
-  output.value = formatRefreshInterval(seconds);
+  setRefreshExactDisplay(minutesInput, output, seconds);
 }
 
 function showSettingsError(element: HTMLElement, message: string | null): void {

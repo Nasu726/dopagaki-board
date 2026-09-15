@@ -19,18 +19,19 @@ Current `main` includes:
 - notification-area/system-tray controls and taskbar-free resident behavior
 - shared HTTP failure classification with persisted per-source retry deadlines
 - overlay-only Settings/Add-picker updates that do not rebuild or rehydrate the whole Board
+- reproducible Linux and Windows resident-performance measurement helpers kept outside the runtime bundle
 - frontend build/lint/unit-test gates plus Linux/Windows/macOS release-build CI
 
 GUI/network behavior that cannot be established by CI remains subject to real-device smoke.
 
 ## Current gate before broad feature work
 
-The post-source-expansion code/refactor batch is substantially complete. Keep broad feature expansion behind this validation gate:
+The post-source-expansion code/refactor/tooling batch is complete. Keep broad feature expansion behind this validation gate:
 
-1. #81 — land the reproducible Windows resident-performance measurement helper.
-2. Run one consolidated Windows release-build interaction smoke covering #54/#59/#60/#61/#62/#66/#79.
-3. Run the #63 post-batch resident measurement: Idle/Compact/Board CPU and memory, idle network attribution, and qualitative interaction-under-refresh checks. Record only measured values.
-4. File focused defects for anything found and fix regressions before starting broad expansion.
+1. Run one consolidated Windows release-build interaction smoke covering #54/#59/#60/#61/#62/#66/#79. The execution order is recorded in #63.
+2. Close only the focused verification issues whose checks pass; file focused defects for failures.
+3. Run the #63 post-batch resident measurement from `docs/PERF_BASELINE.md`: Idle CPU/Working Set, attributable idle network, and qualitative interaction-under-refresh checks. Record only measured values and conditions.
+4. Fix any visible/measured regression before starting broad expansion.
 5. #53 — optional YouTube Data API enrichment can resume after this gate; RSS remains the no-key baseline.
 
 ## Windows smoke checklist owners

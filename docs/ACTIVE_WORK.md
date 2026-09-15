@@ -1,66 +1,43 @@
 # Active work checkpoint
 
-Short-lived execution state for the current branch. Durable decisions belong in `DECISIONS.md`; reusable implementation traps belong in `HANDOFF.md`; completed task history belongs in Issues/PRs.
+Short-lived execution state. Durable product decisions belong in `DECISIONS.md`; technical invariants belong in the architecture/refresh docs; completed task history belongs in Issues/PRs.
 
 Last updated: 2026-09-15
 
-## Active branch
+## Stable baseline
 
-- branch: `real-source-adapters-clean`
-- draft PR: #52 — `Ship real Wikipedia, Qiita, Zenn and YouTube source adapters`
-- base: `main` through PR #51
-- parent issue: #48
-- follow-up YouTube API work: #53
-- post-merge frontend maintainability refactor: #54
+`main` is merged through PR #68 (`649d688`). The shipped baseline includes:
 
-## Implemented in #52
+- arXiv, Wikipedia, Qiita, Zenn, and selected-channel YouTube RSS adapters
+- cache-first startup and canonical source-instance deduplication
+- source/widget automatic-refresh settings plus manual refresh
+- responsive 12×8 Board geometry and size-aware feed presentation
+- restored native window dragging permission
+- notification-area/system-tray controls and taskbar-free resident behavior
+- shared HTTP failure classification with persisted per-source retry deadlines
 
-The branch contains working backend + Board presentation for Wikipedia, Qiita, Zenn, and selected-channel YouTube RSS in addition to existing arXiv. All five source kinds use the existing Rust scheduler/cache/source-key boundary.
-
-Frontend configuration provides:
-
-- arXiv: query + max results, >=24 h automatic floor
-- Wikipedia: language + max results, >=6 h floor
-- Qiita: optional query + max results, >=1 h floor
-- Zenn: trend/user/topic + value where needed + max results, >=1 h floor
-- YouTube RSS: channel ID + max results 1..15, >=1 h floor
-
-Each source has manual refresh plus per-widget inherit/OFF/custom automatic refresh. Source edits go through Rust validation/canonicalization and rehydrate only the affected source/widget content.
-
-## YouTube baseline behavior
-
-- public selected-channel RSS; no Google credential required
-- raw `UC...` ID and `/channel/UC...` URL accepted by the frontend; URL parsing is local
-- thumbnails derived from stable video IDs
-- adding YouTube opens configuration immediately
-- cancelling the first configuration keeps the newly created widget so setup can be retried without recreating placement
-- empty channel config is a dormant setup state: the adapter returns no rows before HTTP and does not create failure/backoff noise
-- widgets sharing the same canonical config share scheduler/cache work
-
-Optional Data API enrichment belongs to #53. Users supply their own key; initial work begins with `@handle` resolution/validation and other low-frequency high-value calls. RSS stays the fallback. OAuth/subscription-aware discovery comes later.
-
-## Validation state
-
-- pre-YouTube reconciled head `e945e84` passed Linux/Windows/macOS CI
-- completed YouTube implementation/documentation head `ef90f70` passed Linux/Windows/macOS CI including Tauri release builds
-- changes since that green implementation are documentation-only unless GitHub history says otherwise; final-head CI is still required before merge
-- a real desktop smoke test of the newly exposed sources/YouTube setup is deferred to the user's next available desktop session
+Linux, Windows, and macOS release-build CI was green on the final heads of the merged #67 and #68 changes. GUI/network behavior that cannot be established by CI remains subject to real-device smoke.
 
 ## Current maintenance batch
 
-The documentation reconciliation/noise pass is complete on this branch without behavioral code changes. The next code-maintainability slice is #54 after #52 reaches a stable desktop-tested merge point.
+Prioritize the post-source-expansion cleanup before broad feature work:
 
-Keep #52's code surface stable until the planned smoke test unless review finds a concrete defect.
+1. #54 / #61 — extract widget/source settings from `src/main.ts` and move configuration to a dedicated editing surface without adding a frontend framework.
+2. #60 — while extracting the config boundary, unify new-widget defaults: arXiv/Wikipedia/Qiita/Zenn `maxResults = 3`, YouTube `maxResults = 1`.
+3. #57 / #63 — keep durable docs signal-dense and review each batch for avoidable resident/background work before claiming performance changes.
+4. #62 — add explicit Select/Add Board modes after the settings surface is stable.
+5. #53 — optional YouTube Data API enrichment stays behind this maintenance batch; RSS remains the no-key baseline.
 
-## Next gate
+## Real-device gates still open
 
-At the next desktop session:
+The implementation is already merged; these Issues remain open only for Windows interaction/visual verification:
 
-1. run the release build from the current #52 head
-2. exercise add/config/manual-refresh/cache presentation for Wikipedia, Qiita, Zenn, and YouTube
-3. specifically test YouTube add -> immediate editor -> Cancel -> retained widget -> reopen settings -> configure channel -> refresh/content open
-4. verify Compact/Board/Idle transitions still behave normally with the new sources
-5. note qualitative CPU/memory/network anomalies; record measurements only if actually observed/measured
-6. if smoke + final-head Linux/Windows/macOS CI are satisfactory, reconcile PR #52 once, mark ready, and merge
+- #59 — Compact/Board native window dragging and interaction separation
+- #60 — representative small/medium/large widget density, scrolling, and the pending 3/1 defaults
+- #66 — fully transparent Idle pixels plus notification-area Open/Hide/Quit and shell regressions
 
-After #52, close/update #48 and proceed to #53, #54, or a measured simplification task.
+Record numeric CPU/RSS/network claims only when actually measured. CI green does not substitute for these GUI checks.
+
+## Working rule
+
+Inspect actual GitHub branch/PR/workflow state after any interruption before acting. Keep unrelated maintenance slices in separate PRs where practical, and do useful independent work rather than polling long CI runs continuously.

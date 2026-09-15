@@ -78,16 +78,20 @@ mod tests {
     #[test]
     fn source_identity_uses_adapter_semantic_normalization() {
         assert_eq!(
-            normalize_config("arxiv", r#"{ "maxResults": 12, "query": "cat:cs.AI" }"#).unwrap(),
+            normalize_config("arxiv", r#"{ "maxResults": 3, "query": "cat:cs.AI" }"#).unwrap(),
             "{}"
         );
         assert_eq!(
-            normalize_config("wikipedia", r#"{"language":" JA ","maxResults":12}"#).unwrap(),
+            normalize_config("wikipedia", r#"{"language":" JA ","maxResults":3}"#).unwrap(),
             "{}"
         );
         assert_eq!(
             normalize_config("qiita", r#"{"query":" Rust "}"#).unwrap(),
             r#"{"query":"Rust"}"#
+        );
+        assert_eq!(
+            normalize_config("youtube", r#"{"channelId":"","maxResults":1}"#).unwrap(),
+            "{}"
         );
     }
 

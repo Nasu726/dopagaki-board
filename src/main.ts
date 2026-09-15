@@ -30,6 +30,17 @@ import {
   readYouTubeConfig,
   readZennConfig,
 } from "./source-config";
+import {
+  DEFAULT_AUTO_REFRESH_SECONDS,
+  MAX_AUTO_REFRESH_SECONDS,
+  REFRESH_SLIDER_MAX,
+  formatRefreshInterval,
+  normalizeRefreshSeconds,
+  refreshMinutesToSeconds,
+  secondsToSliderPosition,
+  sliderPositionToSeconds,
+  sourceAutoRefreshFloorSeconds,
+} from "./refresh-controls";
 import "./styles.css";
 import "./cache-ui.css";
 
@@ -117,10 +128,6 @@ const ADDABLE_SOURCE_KINDS = ["arxiv", "wikipedia", "qiita", "zenn", "youtube"] 
 const DEFAULT_GLOBAL_SHORTCUT = "CmdOrCtrl+Shift+Space";
 const COMPACT_CACHE_LIMIT = 3;
 const BOARD_CACHE_LIMIT = 25;
-const REFRESH_SLIDER_MAX = 100;
-const MIN_AUTO_REFRESH_SECONDS = 5 * 60;
-const MAX_AUTO_REFRESH_SECONDS = 24 * 60 * 60;
-const DEFAULT_AUTO_REFRESH_SECONDS = 60 * 60;
 
 function getAppRoot(): HTMLElement {
   const element = document.querySelector<HTMLElement>("#app");
@@ -592,13 +599,13 @@ function renderSettingsMarkup(): string {
           <input id="refresh-interval" type="range" min="0" max="${REFRESH_SLIDER_MAX}" step="1">
           <output id="refresh-interval-output" for="refresh-interval">Loading…</output>
         </div>
-        <p>Left edge is OFF. Source defaults may inherit or override this fallback.</p>
+        <p>Left edge is OFF. Source settings may use this value or choose their own.</p>
         <p id="refresh-error" class="settings-error" hidden></p>
       </section>
       <section class="settings-section" aria-label="Source refresh defaults">
-        <label>Source defaults</label>
+        <label>Source refresh</label>
         <div id="source-refresh-defaults" class="settings-source-list" aria-live="polite">Loading…</div>
-        <p>Each widget can inherit its source default, turn automatic refresh off, or choose a custom interval. Hard source limits still apply.</p>
+        <p>Each widget can use its source setting, turn automatic refresh off, or choose its own interval. Source minimum intervals still apply.</p>
         <p id="source-refresh-error" class="settings-error" hidden></p>
       </section>
     </aside>
@@ -771,13 +778,15 @@ function renderSourceRefreshDefaults(
     const label = document.createElement("strong");
     label.textContent = sourceLabel(source.sourceKind);
     const effective = document.createElement("span");
-    effective.textContent = `effective ${formatRefreshInterval(source.effectiveIntervalSeconds)}`;
+    effective.textContent = source.effectiveIntervalSeconds === null
+      ? "Automatic refresh off"
+      : `Refreshes every ${formatRefreshInterval(source.effectiveIntervalSeconds)}`;
     heading.append(label, effective);
 
     const select = document.createElement("select");
     select.setAttribute("aria-label", `${sourceLabel(source.sourceKind)} refresh default`);
     select.append(
-      refreshModeOption("inherit", "Inherit global"),
+      refreshModeOption("inherit", "Use global setting"),
       refreshModeOption("off", "OFF"),
       refreshModeOption("interval", "Custom"),
     );
@@ -893,47 +902,6 @@ function showSettingsError(element: HTMLElement, message: string | null): void {
   element.hidden = !message;
 }
 
-function sliderPositionToSeconds(position: number): number | null {
-  const normalizedPosition = clamp(Math.round(position), 0, REFRESH_SLIDER_MAX);
-  if (normalizedPosition === 0) {
-    return null;
-  }
-
-  const fraction = (normalizedPosition - 1) / (REFRESH_SLIDER_MAX - 1);
-  const rawSeconds =
-    MIN_AUTO_REFRESH_SECONDS *
-    Math.pow(MAX_AUTO_REFRESH_SECONDS / MIN_AUTO_REFRESH_SECONDS, fraction);
-  const roundedToMinute = Math.round(rawSeconds / 60) * 60;
-  return clamp(roundedToMinute, MIN_AUTO_REFRESH_SECONDS, MAX_AUTO_REFRESH_SECONDS);
-}
-
-function secondsToSliderPosition(seconds: number | null): number {
-  if (seconds === null) {
-    return 0;
-  }
-
-  const bounded = clamp(seconds, MIN_AUTO_REFRESH_SECONDS, MAX_AUTO_REFRESH_SECONDS);
-  const fraction =
-    Math.log(bounded / MIN_AUTO_REFRESH_SECONDS) /
-    Math.log(MAX_AUTO_REFRESH_SECONDS / MIN_AUTO_REFRESH_SECONDS);
-  return clamp(Math.round(1 + fraction * (REFRESH_SLIDER_MAX - 1)), 1, REFRESH_SLIDER_MAX);
-}
-
-function formatRefreshInterval(seconds: number | null): string {
-  if (seconds === null) {
-    return "OFF";
-  }
-  if (seconds < 60 * 60) {
-    return `${Math.round(seconds / 60)} min`;
-  }
-
-  const hours = seconds / (60 * 60);
-  if (hours < 10 && Math.abs(hours - Math.round(hours)) > 0.05) {
-    return `${hours.toFixed(1)} h`;
-  }
-  return `${Math.round(hours)} h`;
-}
-
 function handleBoardPointerDown(event: PointerEvent): void {
   const canvas = event.currentTarget as HTMLElement;
   if (event.target !== canvas) {
@@ -1024,7 +992,7 @@ function openQuerySourceWidgetConfigEditor(element: HTMLElement, widget: WidgetL
         DEFAULT_QIITA_QUERY,
         DEFAULT_QIITA_MAX_RESULTS,
       );
-  const refreshFloor = isArxiv ? "24 h" : "1 h";
+  const refreshFloorSeconds = sourceAutoRefreshFloorSeconds(widget.sourceKind);
 
   for (const editor of document.querySelectorAll<HTMLElement>("[data-widget-config-editor]")) {
     editor.remove();
@@ -1082,7 +1050,8 @@ function openQuerySourceWidgetConfigEditor(element: HTMLElement, widget: WidgetL
 
   const refreshSection = createWidgetRefreshSection(
     refreshConfig,
-    `${label} automatic refresh is always clamped to at least ${refreshFloor}. Manual refresh still works while auto is OFF.`,
+    refreshFloorSeconds,
+    `Minimum automatic interval: ${formatRefreshInterval(refreshFloorSeconds)}. Manual refresh still works while automatic refresh is OFF.`,
   );
 
   const errorElement = document.createElement("p");
@@ -1122,6 +1091,7 @@ function openQuerySourceWidgetConfigEditor(element: HTMLElement, widget: WidgetL
       [queryInput, countInput],
       refreshSection.select,
       refreshSection.slider,
+      refreshSection.minutesInput,
       errorElement,
       submit,
     );
@@ -1148,6 +1118,7 @@ function openWikipediaWidgetConfigEditor(element: HTMLElement, widget: WidgetLay
 
   const config = readWikipediaConfig(widget.sourceConfigJson);
   const refreshConfig = readWidgetRefreshConfig(widget.refreshConfigJson);
+  const refreshFloorSeconds = sourceAutoRefreshFloorSeconds(widget.sourceKind);
   const form = document.createElement("form");
   form.className = "board-widget-config";
   form.dataset.widgetConfigEditor = "";
@@ -1199,7 +1170,8 @@ function openWikipediaWidgetConfigEditor(element: HTMLElement, widget: WidgetLay
 
   const refreshSection = createWidgetRefreshSection(
     refreshConfig,
-    "Wikipedia automatic refresh is always clamped to at least 6 h. Manual refresh still works while auto is OFF.",
+    refreshFloorSeconds,
+    `Minimum automatic interval: ${formatRefreshInterval(refreshFloorSeconds)}. Manual refresh still works while automatic refresh is OFF.`,
   );
 
   const errorElement = document.createElement("p");
@@ -1239,6 +1211,7 @@ function openWikipediaWidgetConfigEditor(element: HTMLElement, widget: WidgetLay
       [languageInput, countInput],
       refreshSection.select,
       refreshSection.slider,
+      refreshSection.minutesInput,
       errorElement,
       submit,
     );
@@ -1265,6 +1238,7 @@ function openZennWidgetConfigEditor(element: HTMLElement, widget: WidgetLayout):
 
   const config = readZennConfig(widget.sourceConfigJson);
   const refreshConfig = readWidgetRefreshConfig(widget.refreshConfigJson);
+  const refreshFloorSeconds = sourceAutoRefreshFloorSeconds(widget.sourceKind);
   const form = document.createElement("form");
   form.className = "board-widget-config";
   form.dataset.widgetConfigEditor = "";
@@ -1336,7 +1310,8 @@ function openZennWidgetConfigEditor(element: HTMLElement, widget: WidgetLayout):
 
   const refreshSection = createWidgetRefreshSection(
     refreshConfig,
-    "Zenn automatic refresh is always clamped to at least 1 h. Manual refresh still works while auto is OFF.",
+    refreshFloorSeconds,
+    `Minimum automatic interval: ${formatRefreshInterval(refreshFloorSeconds)}. Manual refresh still works while automatic refresh is OFF.`,
   );
 
   const errorElement = document.createElement("p");
@@ -1377,6 +1352,7 @@ function openZennWidgetConfigEditor(element: HTMLElement, widget: WidgetLayout):
       [feedTypeSelect, valueInput, countInput],
       refreshSection.select,
       refreshSection.slider,
+      refreshSection.minutesInput,
       errorElement,
       submit,
     ).finally(syncFeedType);
@@ -1403,6 +1379,7 @@ function openYouTubeWidgetConfigEditor(element: HTMLElement, widget: WidgetLayou
 
   const config = readYouTubeConfig(widget.sourceConfigJson);
   const refreshConfig = readWidgetRefreshConfig(widget.refreshConfigJson);
+  const refreshFloorSeconds = sourceAutoRefreshFloorSeconds(widget.sourceKind);
   const form = document.createElement("form");
   form.className = "board-widget-config";
   form.dataset.widgetConfigEditor = "";
@@ -1453,7 +1430,8 @@ function openYouTubeWidgetConfigEditor(element: HTMLElement, widget: WidgetLayou
 
   const refreshSection = createWidgetRefreshSection(
     refreshConfig,
-    "YouTube RSS automatic refresh is always clamped to at least 1 h. Manual refresh still works while auto is OFF.",
+    refreshFloorSeconds,
+    `Minimum automatic interval: ${formatRefreshInterval(refreshFloorSeconds)}. Manual refresh still works while automatic refresh is OFF.`,
   );
 
   const errorElement = document.createElement("p");
@@ -1500,6 +1478,7 @@ function openYouTubeWidgetConfigEditor(element: HTMLElement, widget: WidgetLayou
       [channelInput, countInput],
       refreshSection.select,
       refreshSection.slider,
+      refreshSection.minutesInput,
       errorElement,
       submit,
     );
@@ -1521,8 +1500,18 @@ function openYouTubeWidgetConfigEditor(element: HTMLElement, widget: WidgetLayou
 
 function createWidgetRefreshSection(
   refreshConfig: WidgetRefreshConfig,
+  minimumAutoRefreshSeconds: number,
   helpText: string,
-): { element: HTMLDivElement; select: HTMLSelectElement; slider: HTMLInputElement } {
+): {
+  element: HTMLDivElement;
+  select: HTMLSelectElement;
+  slider: HTMLInputElement;
+  minutesInput: HTMLInputElement;
+} {
+  const minimumSeconds = normalizeRefreshSeconds(
+    minimumAutoRefreshSeconds,
+    minimumAutoRefreshSeconds,
+  );
   const refreshSection = document.createElement("div");
   refreshSection.className = "board-widget-config__refresh";
   const refreshLabel = document.createElement("label");
@@ -1531,7 +1520,7 @@ function createWidgetRefreshSection(
   refreshCaption.textContent = "Automatic refresh";
   const refreshSelect = document.createElement("select");
   refreshSelect.append(
-    refreshModeOption("inherit", "Inherit source default"),
+    refreshModeOption("inherit", "Use source setting"),
     refreshModeOption("off", "OFF"),
     refreshModeOption("interval", "Custom interval"),
   );
@@ -1542,34 +1531,75 @@ function createWidgetRefreshSection(
   refreshRange.className = "board-widget-config__range";
   const refreshSlider = document.createElement("input");
   refreshSlider.type = "range";
-  refreshSlider.min = "1";
+  refreshSlider.min = String(Math.max(1, secondsToSliderPosition(minimumSeconds)));
   refreshSlider.max = String(REFRESH_SLIDER_MAX);
   refreshSlider.step = "1";
-  const refreshSeconds = refreshConfig.autoIntervalSeconds ?? DEFAULT_AUTO_REFRESH_SECONDS;
-  refreshSlider.value = String(Math.max(1, secondsToSliderPosition(refreshSeconds)));
+  const configuredSeconds = refreshConfig.autoIntervalSeconds ?? DEFAULT_AUTO_REFRESH_SECONDS;
+  const refreshSeconds = normalizeRefreshSeconds(configuredSeconds, minimumSeconds);
   const refreshOutput = document.createElement("output");
-  refreshOutput.value = formatRefreshInterval(refreshSeconds);
   refreshRange.append(refreshSlider, refreshOutput);
+
+  const exactLabel = document.createElement("label");
+  exactLabel.className = "board-widget-config__field board-widget-config__field--count";
+  const exactCaption = document.createElement("span");
+  exactCaption.textContent = "Every (minutes)";
+  const minutesInput = document.createElement("input");
+  minutesInput.type = "number";
+  minutesInput.min = String(Math.ceil(minimumSeconds / 60));
+  minutesInput.max = String(Math.floor(MAX_AUTO_REFRESH_SECONDS / 60));
+  minutesInput.step = "1";
+  minutesInput.required = true;
+  minutesInput.inputMode = "numeric";
+  exactLabel.append(exactCaption, minutesInput);
 
   const refreshHelp = document.createElement("p");
   refreshHelp.className = "board-widget-config__help";
   refreshHelp.textContent = helpText;
-  refreshSection.append(refreshLabel, refreshRange, refreshHelp);
+  refreshSection.append(refreshLabel, refreshRange, exactLabel, refreshHelp);
+
+  const syncFromSeconds = (seconds: number): void => {
+    const normalized = normalizeRefreshSeconds(seconds, minimumSeconds);
+    refreshSlider.value = String(
+      Math.max(Number(refreshSlider.min), secondsToSliderPosition(normalized)),
+    );
+    minutesInput.value = String(Math.round(normalized / 60));
+    refreshOutput.value = formatRefreshInterval(normalized);
+  };
 
   const syncRefreshControls = (): void => {
     const custom = refreshSelect.value === "interval";
     refreshRange.hidden = !custom;
+    exactLabel.hidden = !custom;
     refreshSlider.disabled = !custom;
+    minutesInput.disabled = !custom;
   };
+
+  syncFromSeconds(refreshSeconds);
   syncRefreshControls();
   refreshSelect.addEventListener("change", syncRefreshControls);
   refreshSlider.addEventListener("input", () => {
-    refreshOutput.value = formatRefreshInterval(
-      sliderPositionToSeconds(Number(refreshSlider.value)),
+    const seconds = sliderPositionToSeconds(Number(refreshSlider.value)) ?? minimumSeconds;
+    syncFromSeconds(seconds);
+  });
+  minutesInput.addEventListener("input", () => {
+    if (minutesInput.value === "") {
+      return;
+    }
+    const minutes = Number(minutesInput.value);
+    if (!Number.isFinite(minutes)) {
+      return;
+    }
+    const normalized = refreshMinutesToSeconds(minutes, minimumSeconds);
+    refreshSlider.value = String(
+      Math.max(Number(refreshSlider.min), secondsToSliderPosition(normalized)),
     );
+    refreshOutput.value = formatRefreshInterval(normalized);
+  });
+  minutesInput.addEventListener("change", () => {
+    syncFromSeconds(refreshMinutesToSeconds(Number(minutesInput.value), minimumSeconds));
   });
 
-  return { element: refreshSection, select: refreshSelect, slider: refreshSlider };
+  return { element: refreshSection, select: refreshSelect, slider: refreshSlider, minutesInput };
 }
 
 function zennFeedTypeOption(value: ZennFeedType, label: string): HTMLOptionElement {
@@ -1604,7 +1634,7 @@ function readWidgetRefreshConfig(refreshConfigJson: string): WidgetRefreshConfig
 
 function widgetRefreshConfigJson(
   mode: RefreshMode,
-  sliderPosition: number,
+  autoIntervalSeconds: number | null,
 ): string {
   if (mode === "inherit") {
     return "{}";
@@ -1612,7 +1642,6 @@ function widgetRefreshConfigJson(
   if (mode === "off") {
     return JSON.stringify({ mode: "off" });
   }
-  const autoIntervalSeconds = sliderPositionToSeconds(sliderPosition) ?? MIN_AUTO_REFRESH_SECONDS;
   return JSON.stringify({ mode: "interval", autoIntervalSeconds });
 }
 
@@ -1624,6 +1653,7 @@ async function saveWidgetSettings(
   sourceControls: Array<HTMLInputElement | HTMLSelectElement>,
   refreshSelect: HTMLSelectElement,
   refreshSlider: HTMLInputElement,
+  refreshMinutes: HTMLInputElement,
   errorElement: HTMLElement,
   submitButton: HTMLButtonElement,
 ): Promise<void> {
@@ -1635,6 +1665,7 @@ async function saveWidgetSettings(
   }
   refreshSelect.disabled = true;
   refreshSlider.disabled = true;
+  refreshMinutes.disabled = true;
   form.setAttribute("aria-busy", "true");
 
   let sourceSaved = false;
@@ -1645,11 +1676,15 @@ async function saveWidgetSettings(
     });
     sourceSaved = true;
 
+    const customSeconds = refreshMinutesToSeconds(
+      Number(refreshMinutes.value),
+      Number(refreshMinutes.min) * 60,
+    );
     const updated = await invoke<WidgetLayout>("update_widget_refresh_config", {
       id,
       refreshConfigJson: widgetRefreshConfigJson(
         refreshSelect.value as RefreshMode,
-        Number(refreshSlider.value),
+        customSeconds,
       ),
     });
 
@@ -1689,7 +1724,9 @@ async function saveWidgetSettings(
         control.disabled = false;
       }
       refreshSelect.disabled = false;
-      refreshSlider.disabled = refreshSelect.value !== "interval";
+      const custom = refreshSelect.value === "interval";
+      refreshSlider.disabled = !custom;
+      refreshMinutes.disabled = !custom;
       form.removeAttribute("aria-busy");
     }
   }
@@ -2124,10 +2161,6 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(Math.max(value, minimum), maximum);
 }
 
 void boot();

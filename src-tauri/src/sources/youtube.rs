@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 const DEFAULT_CHANNEL_ID: &str = "";
-const DEFAULT_MAX_RESULTS: usize = 12;
+const DEFAULT_MAX_RESULTS: usize = 1;
 const MAX_RESULTS: usize = 15;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -161,7 +161,9 @@ mod tests {
     #[test]
     fn empty_config_is_valid_for_initial_widget_setup() {
         assert_eq!(normalize_config("{}").unwrap(), "{}");
-        assert_eq!(parse_config("{}").unwrap().channel_id, "");
+        let config = parse_config("{}").unwrap();
+        assert_eq!(config.channel_id, "");
+        assert_eq!(config.max_results, 1);
         assert!(normalize_config(r#"{"channelId":"not-a-channel"}"#).is_err());
     }
 

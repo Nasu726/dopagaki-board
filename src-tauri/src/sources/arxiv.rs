@@ -9,7 +9,7 @@ const API_ENDPOINT: &str = "https://export.arxiv.org/api/query";
 const USER_AGENT: &str = "dopagaki-board/0.1 (https://github.com/Nasu726/dopagaki-board)";
 const MIN_REQUEST_GAP: Duration = Duration::from_secs(3);
 const DEFAULT_QUERY: &str = "cat:cs.AI";
-const DEFAULT_MAX_RESULTS: usize = 12;
+const DEFAULT_MAX_RESULTS: usize = 3;
 const MAX_RESULTS: usize = 25;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -272,18 +272,18 @@ mod tests {
     fn empty_config_uses_bounded_defaults() {
         let config = parse_config("{}").expect("default config should parse");
         assert_eq!(config.query, DEFAULT_QUERY);
-        assert_eq!(config.max_results, DEFAULT_MAX_RESULTS);
+        assert_eq!(config.max_results, 3);
     }
 
     #[test]
     fn semantic_defaults_collapse_to_sparse_canonical_identity() {
         assert_eq!(normalize_config("{}").unwrap(), "{}");
         assert_eq!(
-            normalize_config(r#"{"query":"cat:cs.AI","maxResults":12}"#).unwrap(),
+            normalize_config(r#"{"query":"cat:cs.AI","maxResults":3}"#).unwrap(),
             "{}"
         );
         assert_eq!(
-            normalize_config(r#"{"query":"  cat:cs.LG  ","maxResults":12}"#).unwrap(),
+            normalize_config(r#"{"query":"  cat:cs.LG  ","maxResults":3}"#).unwrap(),
             r#"{"query":"cat:cs.LG"}"#
         );
         assert_eq!(

@@ -1,6 +1,8 @@
 # Roadmap
 
-Current checkpoint (2026-09-15): **functional MVP is in real-use expansion.** The Tauri shell, four-state loop, responsive 12×8 Board, SQLite cache/scheduler, source-aware refresh policy, and five working public-source presentations are implemented on the active source-expansion branch. PR #52 is code-complete for arXiv/Wikipedia/Qiita/Zenn/YouTube RSS and is waiting on final-head CI plus the user's planned real-desktop smoke test before merge. Optional YouTube Data API work is #53.
+Current checkpoint (2026-09-15): **functional MVP is in a real-use maintenance pass.** The Tauri shell, four-state loop, responsive 12×8 Board, SQLite cache/scheduler, source-aware refresh policy, five working public-source presentations, notification-area controls, and source-scoped retry/backoff behavior are on `main`.
+
+The current priority is to simplify and verify that baseline before another broad feature expansion: extract/redesign widget settings (#54/#61), finish the glanceable result-count defaults and resize smoke (#60), complete remaining Windows shell checks (#59/#66), and keep the lightweightness/docs passes active (#57/#63). Optional YouTube Data API work remains #53.
 
 ## Phase 0 — durable specification
 
@@ -22,7 +24,8 @@ Current checkpoint (2026-09-15): **functional MVP is in real-use expansion.** Th
 - [x] Transparent Idle orb + boolean update badge.
 - [x] Cache-driven Compact and configurable global shortcut.
 - [x] Compact external launch -> Idle without waiting for network.
-- [ ] Continue real-device transition/startup measurement as behavior evolves.
+- [x] Taskbar-free resident shell with notification-area controls.
+- [ ] Continue real-device transition/startup/shell verification as behavior evolves.
 
 ## Phase 3 — responsive Board
 
@@ -31,7 +34,9 @@ Current checkpoint (2026-09-15): **functional MVP is in real-use expansion.** Th
 - [x] Grid-snapped drag and eight-direction resize.
 - [x] Non-overlap without neighbor push/reflow.
 - [x] Gesture-end persistence and legacy pixel-layout conversion.
-- [ ] Continue real-device review across practical window sizes.
+- [x] Size-aware feed presentation through lightweight container queries.
+- [ ] Finish real-device review across representative widget/window sizes (#60).
+- [ ] Introduce explicit Select/Add interaction modes after the settings surface stabilizes (#62).
 
 ## Phase 4 — cache and scheduler
 
@@ -41,6 +46,7 @@ Current checkpoint (2026-09-15): **functional MVP is in real-use expansion.** Th
 - [x] Narrow refresh-path DB queries and narrow cache-change UI updates.
 - [x] Global/source/widget refresh resolution with OFF and manual refresh.
 - [x] Shared-source scheduling by canonical source identity.
+- [x] Shared HTTP failure classification with rate-limit retry floors persisted per source instance.
 
 ## Phase 5 — real adapters
 
@@ -52,32 +58,39 @@ Current checkpoint (2026-09-15): **functional MVP is in real-use expansion.** Th
 6. [ ] YouTube Data API enrichment — optional user-supplied key with RSS fallback; tracked by #53.
 7. [ ] YouTube OAuth/subscription-aware discovery — later update after practical non-OAuth use is proven.
 
-PR #52's remaining gate is evidence, not adapter implementation: real desktop smoke testing and final merge validation.
+The five-source public baseline is merged. Remaining source-adjacent work is product polish/verification and optional API-assisted expansion rather than an adapter merge gate.
 
-## Phase 6 — API-assisted discovery and media discipline
+## Phase 6 — settings and maintainability
+
+- [ ] Extract cohesive source/widget configuration logic from the frontend monolith (#54).
+- [ ] Move widget configuration into a dedicated editing surface with clear source/refresh grouping (#61).
+- [ ] Allow exact automatic-refresh interval entry while keeping the slider synchronized (#61).
+- [ ] Keep Rust as the authoritative validation/canonicalization boundary and preserve narrow rehydration.
+
+## Phase 7 — API-assisted discovery and media discipline
 
 Add Data API capability incrementally, beginning with `@handle` resolution/validation and only then useful visible metadata or bounded candidate discovery. API credentials are user-supplied; API/background work stays bounded to useful results.
 
 For media loading: visible thumbnails first; near-visible preload only when justified; off-screen preload only after measurement; foreground work always wins.
 
-## Phase 7 — recommendation
+## Phase 8 — recommendation
 
 Recommendation/ranking is application-owned. RSS/API/OAuth may broaden the candidate pool, while ranking remains separate and bounded by cache/quota budgets.
 
 Start with transparent heuristics: freshness, already-shown penalty, click history, channel preference, and controlled randomness. Tune only after real usage data exists.
 
-## Phase 8 — recurring simplification and real use
+## Phase 9 — recurring simplification and real use
 
 This is a loop, not an end phase:
 
-1. measure
-2. remove unnecessary dependencies/DOM/state/background work
-3. use the app daily
-4. fix observed friction
-5. repeat
+1. stabilize and validate a feature batch
+2. measure representative resident/interaction behavior
+3. remove unnecessary dependencies, DOM/state work, polling, duplicate I/O, and broad rehydration
+4. use the app daily and fix observed friction
+5. repeat before the next broad feature batch
 
 Performance wins require measurement rather than inference from structural refactors alone.
 
-## Phase 9 — native decision
+## Phase 10 — native decision
 
 Only after product value is proven, compare Tauri against measured pain points: resident memory, idle CPU, startup, window behavior, and OS integration. A native rewrite is justified only by concrete benefit large enough to offset maintaining platform-specific implementations.

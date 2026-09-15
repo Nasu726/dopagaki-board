@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 const DEFAULT_FEED_TYPE: &str = "trend";
-const DEFAULT_MAX_RESULTS: usize = 12;
+const DEFAULT_MAX_RESULTS: usize = 3;
 const MAX_RESULTS: usize = 25;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -158,6 +158,7 @@ mod tests {
     #[test]
     fn config_supports_trend_user_and_topic() {
         assert_eq!(normalize_config("{}").unwrap(), "{}");
+        assert_eq!(parse_config("{}").unwrap().max_results, 3);
         assert_eq!(
             normalize_config(r#"{"feedType":"user","value":" zenn ","maxResults":5}"#).unwrap(),
             r#"{"feedType":"user","maxResults":5,"value":"zenn"}"#

@@ -17,6 +17,19 @@ import {
   rectToStyle,
   resizeGridRect,
 } from "./board-grid";
+import {
+  DEFAULT_ARXIV_MAX_RESULTS,
+  DEFAULT_ARXIV_QUERY,
+  DEFAULT_QIITA_MAX_RESULTS,
+  DEFAULT_QIITA_QUERY,
+  DEFAULT_WIKIPEDIA_LANGUAGE,
+  type ZennFeedType,
+  normalizeYouTubeChannelInput,
+  readQuerySourceConfig,
+  readWikipediaConfig,
+  readYouTubeConfig,
+  readZennConfig,
+} from "./source-config";
 import "./styles.css";
 import "./cache-ui.css";
 
@@ -65,7 +78,6 @@ type RefreshSettings = {
 };
 
 type RefreshMode = "inherit" | "off" | "interval";
-type ZennFeedType = "trend" | "user" | "topic";
 
 type SourceRefreshDefault = {
   sourceKind: string;
@@ -93,27 +105,6 @@ type SourceGroup = {
   widgetIds: number[];
 };
 
-type QuerySourceConfig = {
-  query: string;
-  maxResults: number;
-};
-
-type WikipediaSourceConfig = {
-  language: string;
-  maxResults: number;
-};
-
-type ZennSourceConfig = {
-  feedType: ZennFeedType;
-  value: string;
-  maxResults: number;
-};
-
-type YouTubeSourceConfig = {
-  channelId: string;
-  maxResults: number;
-};
-
 const SOURCE_LABELS: Record<string, string> = {
   youtube: "YouTube",
   arxiv: "arXiv",
@@ -130,16 +121,6 @@ const REFRESH_SLIDER_MAX = 100;
 const MIN_AUTO_REFRESH_SECONDS = 5 * 60;
 const MAX_AUTO_REFRESH_SECONDS = 24 * 60 * 60;
 const DEFAULT_AUTO_REFRESH_SECONDS = 60 * 60;
-const DEFAULT_ARXIV_QUERY = "cat:cs.AI";
-const DEFAULT_ARXIV_MAX_RESULTS = 12;
-const DEFAULT_WIKIPEDIA_LANGUAGE = "ja";
-const DEFAULT_WIKIPEDIA_MAX_RESULTS = 12;
-const DEFAULT_QIITA_QUERY = "";
-const DEFAULT_QIITA_MAX_RESULTS = 12;
-const DEFAULT_ZENN_FEED_TYPE: ZennFeedType = "trend";
-const DEFAULT_ZENN_MAX_RESULTS = 12;
-const DEFAULT_YOUTUBE_CHANNEL_ID = "";
-const DEFAULT_YOUTUBE_MAX_RESULTS = 12;
 
 function getAppRoot(): HTMLElement {
   const element = document.querySelector<HTMLElement>("#app");
@@ -1596,94 +1577,6 @@ function zennFeedTypeOption(value: ZennFeedType, label: string): HTMLOptionEleme
   option.value = value;
   option.textContent = label;
   return option;
-}
-
-function readQuerySourceConfig(
-  sourceConfigJson: string,
-  defaultQuery: string,
-  defaultMaxResults: number,
-): QuerySourceConfig {
-  try {
-    const parsed = JSON.parse(sourceConfigJson) as Partial<QuerySourceConfig>;
-    return {
-      query: typeof parsed.query === "string" ? parsed.query : defaultQuery,
-      maxResults:
-        typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
-          ? parsed.maxResults
-          : defaultMaxResults,
-    };
-  } catch {
-    return {
-      query: defaultQuery,
-      maxResults: defaultMaxResults,
-    };
-  }
-}
-
-function readWikipediaConfig(sourceConfigJson: string): WikipediaSourceConfig {
-  try {
-    const parsed = JSON.parse(sourceConfigJson) as Partial<WikipediaSourceConfig>;
-    return {
-      language:
-        typeof parsed.language === "string" ? parsed.language : DEFAULT_WIKIPEDIA_LANGUAGE,
-      maxResults:
-        typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
-          ? parsed.maxResults
-          : DEFAULT_WIKIPEDIA_MAX_RESULTS,
-    };
-  } catch {
-    return {
-      language: DEFAULT_WIKIPEDIA_LANGUAGE,
-      maxResults: DEFAULT_WIKIPEDIA_MAX_RESULTS,
-    };
-  }
-}
-
-function readZennConfig(sourceConfigJson: string): ZennSourceConfig {
-  try {
-    const parsed = JSON.parse(sourceConfigJson) as Partial<ZennSourceConfig>;
-    const feedType =
-      parsed.feedType === "user" || parsed.feedType === "topic" ? parsed.feedType : DEFAULT_ZENN_FEED_TYPE;
-    return {
-      feedType,
-      value: typeof parsed.value === "string" ? parsed.value : "",
-      maxResults:
-        typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
-          ? parsed.maxResults
-          : DEFAULT_ZENN_MAX_RESULTS,
-    };
-  } catch {
-    return {
-      feedType: DEFAULT_ZENN_FEED_TYPE,
-      value: "",
-      maxResults: DEFAULT_ZENN_MAX_RESULTS,
-    };
-  }
-}
-
-function readYouTubeConfig(sourceConfigJson: string): YouTubeSourceConfig {
-  try {
-    const parsed = JSON.parse(sourceConfigJson) as Partial<YouTubeSourceConfig>;
-    return {
-      channelId:
-        typeof parsed.channelId === "string" ? parsed.channelId : DEFAULT_YOUTUBE_CHANNEL_ID,
-      maxResults:
-        typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
-          ? parsed.maxResults
-          : DEFAULT_YOUTUBE_MAX_RESULTS,
-    };
-  } catch {
-    return {
-      channelId: DEFAULT_YOUTUBE_CHANNEL_ID,
-      maxResults: DEFAULT_YOUTUBE_MAX_RESULTS,
-    };
-  }
-}
-
-function normalizeYouTubeChannelInput(value: string): string | null {
-  const trimmed = value.trim();
-  const match = trimmed.match(/(?:^|\/channel\/)(UC[A-Za-z0-9_-]{18,30})(?:[\/?#]|$)/);
-  return match?.[1] ?? null;
 }
 
 function readWidgetRefreshConfig(refreshConfigJson: string): WidgetRefreshConfig {

@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 const DEFAULT_LANGUAGE: &str = "ja";
-const DEFAULT_MAX_RESULTS: usize = 12;
+const DEFAULT_MAX_RESULTS: usize = 3;
 const MAX_RESULTS: usize = 25;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -147,6 +147,7 @@ mod tests {
     #[test]
     fn defaults_are_sparse_and_language_is_normalized() {
         assert_eq!(normalize_config("{}").unwrap(), "{}");
+        assert_eq!(parse_config("{}").unwrap().max_results, 3);
         assert_eq!(
             normalize_config(r#"{"language":" EN ","maxResults":5}"#).unwrap(),
             r#"{"language":"en","maxResults":5}"#

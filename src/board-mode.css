@@ -35,11 +35,16 @@
   cursor: crosshair;
 }
 
-.board-canvas--add .board-widget__drag {
+.board-canvas--add .board-widget__drag,
+.board-canvas--add .board-widget__content {
   cursor: default;
 }
 
+.board-canvas--add .board-widget__delete,
+.board-canvas--add .board-widget__refresh,
+.board-canvas--add .board-widget__config,
 .board-canvas--add .board-widget__resize {
+  opacity: 0 !important;
   pointer-events: none;
 }
 

@@ -3,6 +3,13 @@ export const MIN_AUTO_REFRESH_SECONDS = 300;
 export const MAX_AUTO_REFRESH_SECONDS = 86400;
 export const DEFAULT_AUTO_REFRESH_SECONDS = 3600;
 
+export type RefreshMode = "inherit" | "off" | "interval";
+
+export type WidgetRefreshConfig = {
+  mode: RefreshMode;
+  autoIntervalSeconds: number | null;
+};
+
 // Presentation mirror of the Rust refresh policy. A Rust regression test reads
 // these explicit values so changing one side without the other fails CI.
 const SOURCE_AUTO_REFRESH_FLOOR_SECONDS: Record<string, number> = {
@@ -15,6 +22,41 @@ const SOURCE_AUTO_REFRESH_FLOOR_SECONDS: Record<string, number> = {
 
 export function sourceAutoRefreshFloorSeconds(sourceKind: string): number {
   return SOURCE_AUTO_REFRESH_FLOOR_SECONDS[sourceKind] ?? MIN_AUTO_REFRESH_SECONDS;
+}
+
+export function readWidgetRefreshConfig(refreshConfigJson: string): WidgetRefreshConfig {
+  try {
+    const parsed = JSON.parse(refreshConfigJson) as {
+      mode?: unknown;
+      autoIntervalSeconds?: unknown;
+    };
+    if (parsed.mode === "off") {
+      return { mode: "off", autoIntervalSeconds: null };
+    }
+    if (
+      parsed.mode === "interval" &&
+      typeof parsed.autoIntervalSeconds === "number" &&
+      Number.isFinite(parsed.autoIntervalSeconds)
+    ) {
+      return { mode: "interval", autoIntervalSeconds: parsed.autoIntervalSeconds };
+    }
+  } catch {
+    // Presentation fallback only. Rust remains authoritative when saving.
+  }
+  return { mode: "inherit", autoIntervalSeconds: null };
+}
+
+export function widgetRefreshConfigJson(
+  mode: RefreshMode,
+  autoIntervalSeconds: number | null,
+): string {
+  if (mode === "inherit") {
+    return "{}";
+  }
+  if (mode === "off") {
+    return JSON.stringify({ mode: "off" });
+  }
+  return JSON.stringify({ mode: "interval", autoIntervalSeconds });
 }
 
 export function sliderPositionToSeconds(position: number): number | null {

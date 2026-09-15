@@ -25,11 +25,13 @@ import {
   sliderPositionToSeconds,
 } from "./refresh-controls";
 import {
+  closeOpenWidgetSettings,
   openWidgetSettings,
   type WidgetSettingsSaveInput,
 } from "./widget-settings";
 import "./styles.css";
 import "./cache-ui.css";
+import "./board-mode.css";
 
 type ViewState = "hidden" | "idle" | "compact" | "board";
 type ViewEvent =
@@ -38,6 +40,7 @@ type ViewEvent =
   | "openCompact"
   | "openBoard"
   | "hide";
+type BoardMode = "select" | "add";
 
 type ShellStatus = {
   hasUnseen: boolean;
@@ -121,6 +124,7 @@ function getAppRoot(): HTMLElement {
 
 const root = getAppRoot();
 let currentView: ViewState = "idle";
+let boardMode: BoardMode = "select";
 let shellStatus: ShellStatus = {
   hasUnseen: false,
   globalShortcut: DEFAULT_GLOBAL_SHORTCUT,
@@ -312,21 +316,28 @@ function createCompactItem(item: CachedItem): HTMLButtonElement {
 function renderBoard(): void {
   const generation = ++boardHydrationGeneration;
   const widgetMarkup = boardWidgets.map(renderWidgetMarkup).join("");
-  const pickerMarkup = addPoint ? renderAddPickerMarkup(addPoint) : "";
+  const pickerMarkup = boardMode === "add" && addPoint ? renderAddPickerMarkup(addPoint) : "";
   const settingsMarkup = settingsOpen ? renderSettingsMarkup() : "";
+  const boardHint = boardMode === "select"
+    ? "Drag widgets to move · resize from edges"
+    : "Click empty space to place a source";
 
   root.innerHTML = `
     <main class="board-shell">
       <header class="board-toolbar">
         <div class="window-drag-region" data-tauri-drag-region title="Drag window">
           <strong data-tauri-drag-region>Board</strong>
-          <span class="board-toolbar__hint" data-tauri-drag-region>Click empty space to add · drag widgets to move</span>
+          <span class="board-toolbar__hint" data-board-mode-hint data-tauri-drag-region>${boardHint}</span>
+        </div>
+        <div class="board-mode-switch" role="group" aria-label="Board mode">
+          <button class="board-mode-button" data-board-mode="select" type="button" aria-pressed="${boardMode === "select"}">Select</button>
+          <button class="board-mode-button" data-board-mode="add" type="button" aria-pressed="${boardMode === "add"}">Add</button>
         </div>
         <button class="icon-button" data-action="settings" type="button" aria-label="Settings" title="Settings">⚙</button>
         <button class="icon-button" data-action="restore" type="button" aria-label="Restore Compact" title="Restore down to Compact">▱</button>
         <button class="icon-button" data-action="collapse" type="button" aria-label="Collapse to Idle" title="Minimize to Idle">—</button>
       </header>
-      <section class="board-canvas${boardWidgets.length === 0 ? " board-canvas--empty" : ""}" aria-label="Discovery Board">
+      <section class="board-canvas board-canvas--${boardMode}${boardWidgets.length === 0 ? " board-canvas--empty" : ""}" aria-label="Discovery Board">
         ${widgetMarkup}
         ${pickerMarkup}
       </section>
@@ -345,6 +356,7 @@ function renderBoard(): void {
   });
 
   document.querySelector('[data-action="settings"]')?.addEventListener("click", () => {
+    boardMode = "select";
     settingsOpen = !settingsOpen;
     shortcutFormError = null;
     refreshFormError = null;
@@ -353,6 +365,15 @@ function renderBoard(): void {
     renderBoard();
   });
 
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-board-mode]")) {
+    button.addEventListener("click", () => {
+      const mode = button.dataset.boardMode;
+      if (mode === "select" || mode === "add") {
+        setBoardMode(mode);
+      }
+    });
+  }
+
   const canvas = document.querySelector<HTMLElement>(".board-canvas");
   canvas?.addEventListener("pointerdown", handleBoardPointerDown);
 
@@ -360,7 +381,7 @@ function renderBoard(): void {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       const sourceKind = button.dataset.addSource;
-      if (sourceKind && addPoint) {
+      if (boardMode === "add" && sourceKind && addPoint) {
         void addBoardWidget(sourceKind, addPoint);
       }
     });
@@ -368,8 +389,7 @@ function renderBoard(): void {
 
   document.querySelector('[data-action="cancel-add"]')?.addEventListener("click", (event) => {
     event.stopPropagation();
-    addPoint = null;
-    renderBoard();
+    setBoardMode("select");
   });
 
   bindSettings();
@@ -379,6 +399,42 @@ function renderBoard(): void {
   if (!boardLoaded) {
     boardLoaded = true;
     void loadBoardWidgets();
+  }
+}
+
+function setBoardMode(mode: BoardMode): void {
+  boardMode = mode;
+  addPoint = null;
+  settingsOpen = false;
+  closeOpenWidgetSettings();
+  document.querySelector(".add-picker")?.remove();
+  document.querySelector(".settings-popover")?.remove();
+  applyBoardModeToVisibleUi();
+}
+
+function resetBoardMode(): void {
+  boardMode = "select";
+  addPoint = null;
+}
+
+function applyBoardModeToVisibleUi(): void {
+  if (currentView !== "board") {
+    return;
+  }
+
+  const canvas = document.querySelector<HTMLElement>(".board-canvas");
+  canvas?.classList.toggle("board-canvas--select", boardMode === "select");
+  canvas?.classList.toggle("board-canvas--add", boardMode === "add");
+
+  const hint = document.querySelector<HTMLElement>("[data-board-mode-hint]");
+  if (hint) {
+    hint.textContent = boardMode === "select"
+      ? "Drag widgets to move · resize from edges"
+      : "Click empty space to place a source";
+  }
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-board-mode]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.boardMode === boardMode));
   }
 }
 
@@ -527,7 +583,9 @@ function renderBoardCachedItems(
 
     button.append(text);
     button.addEventListener("click", () => {
-      void openContent(item.externalUrl);
+      if (boardMode === "select") {
+        void openContent(item.externalUrl);
+      }
     });
     container.append(button);
   }
@@ -886,7 +944,7 @@ function showSettingsError(element: HTMLElement, message: string | null): void {
 
 function handleBoardPointerDown(event: PointerEvent): void {
   const canvas = event.currentTarget as HTMLElement;
-  if (event.target !== canvas) {
+  if (boardMode !== "add" || event.target !== canvas) {
     return;
   }
 
@@ -906,7 +964,10 @@ function bindWidgetInteractions(): void {
     }
 
     element.querySelector<HTMLElement>("[data-drag-handle]")?.addEventListener("pointerdown", (event) => {
-      if ((event.target as HTMLElement).closest("[data-delete-widget], [data-refresh-widget], [data-config-widget]")) {
+      if (
+        boardMode !== "select" ||
+        (event.target as HTMLElement).closest("[data-delete-widget], [data-refresh-widget], [data-config-widget]")
+      ) {
         return;
       }
       startDrag(event, element, id);
@@ -914,6 +975,9 @@ function bindWidgetInteractions(): void {
 
     for (const handle of element.querySelectorAll<HTMLElement>("[data-resize-handle]")) {
       handle.addEventListener("pointerdown", (event) => {
+        if (boardMode !== "select") {
+          return;
+        }
         const direction = handle.dataset.resizeHandle as ResizeDirection | undefined;
         if (direction) {
           startResize(event, element, id, direction);
@@ -923,22 +987,31 @@ function bindWidgetInteractions(): void {
 
     element.querySelector<HTMLElement>("[data-delete-widget]")?.addEventListener("click", (event) => {
       event.stopPropagation();
-      void removeBoardWidget(id);
+      if (boardMode === "select") {
+        void removeBoardWidget(id);
+      }
     });
 
     element.querySelector<HTMLButtonElement>("[data-config-widget]")?.addEventListener("click", (event) => {
       event.stopPropagation();
-      openWidgetConfigEditor(element, id);
+      if (boardMode === "select") {
+        openWidgetConfigEditor(element, id);
+      }
     });
 
     element.querySelector<HTMLButtonElement>("[data-refresh-widget]")?.addEventListener("click", (event) => {
       event.stopPropagation();
-      void refreshBoardWidget(id, event.currentTarget as HTMLButtonElement);
+      if (boardMode === "select") {
+        void refreshBoardWidget(id, event.currentTarget as HTMLButtonElement);
+      }
     });
   }
 }
 
 function openWidgetConfigEditor(element: HTMLElement, id: number): void {
+  if (boardMode !== "select") {
+    return;
+  }
   const widget = boardWidgets.find((item) => item.id === id);
   if (!widget) {
     return;
@@ -1044,6 +1117,9 @@ async function refreshBoardWidget(id: number, button: HTMLButtonElement): Promis
 }
 
 function startDrag(event: PointerEvent, element: HTMLElement, id: number): void {
+  if (boardMode !== "select") {
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
 
@@ -1098,6 +1174,9 @@ function startResize(
   id: number,
   direction: ResizeDirection,
 ): void {
+  if (boardMode !== "select") {
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
 
@@ -1252,7 +1331,7 @@ async function addBoardWidget(sourceKind: string, point: GridPoint): Promise<voi
       height: rect.height,
     });
     boardWidgets.push(widget);
-    addPoint = null;
+    resetBoardMode();
     renderBoard();
     if (sourceKind === "youtube") {
       const element = document.querySelector<HTMLElement>(`[data-widget-id="${widget.id}"]`);
@@ -1308,7 +1387,12 @@ async function saveGlobalShortcut(shortcut: string): Promise<void> {
 
 async function transitionView(event: ViewEvent): Promise<void> {
   try {
-    currentView = await invoke<ViewState>("transition_view", { event });
+    const previousView = currentView;
+    const nextView = await invoke<ViewState>("transition_view", { event });
+    if (nextView === "board" && previousView !== "board") {
+      resetBoardMode();
+    }
+    currentView = nextView;
     render();
   } catch (error) {
     console.error("view transition failed", error);
@@ -1386,6 +1470,10 @@ async function applyCacheChangeToVisibleUi(change: CacheChanged): Promise<void> 
 
 async function boot(): Promise<void> {
   await listen<ViewState>("view-state-changed", (event) => {
+    const previousView = currentView;
+    if (event.payload === "board" && previousView !== "board") {
+      resetBoardMode();
+    }
     currentView = event.payload;
     render();
   });
@@ -1402,6 +1490,9 @@ async function boot(): Promise<void> {
 
   try {
     currentView = await invoke<ViewState>("get_view_state");
+    if (currentView === "board") {
+      resetBoardMode();
+    }
   } catch (error) {
     console.error("failed to read initial view state", error);
   }

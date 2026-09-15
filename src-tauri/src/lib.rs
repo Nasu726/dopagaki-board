@@ -9,7 +9,11 @@ mod source_config;
 mod sources;
 
 use std::fs;
-use tauri::Manager;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+    Manager,
+};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -58,6 +62,42 @@ pub fn run() {
                     ),
                 };
             }
+
+            let open_compact =
+                MenuItem::with_id(app, "open-compact", "Open Compact", true, None::<&str>)?;
+            let open_board =
+                MenuItem::with_id(app, "open-board", "Open Board", true, None::<&str>)?;
+            let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&open_compact, &open_board, &hide, &quit])?;
+
+            let mut tray = TrayIconBuilder::new()
+                .tooltip("dopagaki-board")
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| {
+                    let result = match event.id().as_ref() {
+                        "open-compact" => {
+                            app::transition_view(app, app::ViewEvent::OpenCompact).map(|_| ())
+                        }
+                        "open-board" => {
+                            app::transition_view(app, app::ViewEvent::OpenBoard).map(|_| ())
+                        }
+                        "hide" => app::transition_view(app, app::ViewEvent::Hide).map(|_| ()),
+                        "quit" => {
+                            app.exit(0);
+                            Ok(())
+                        }
+                        _ => Ok(()),
+                    };
+
+                    if let Err(error) = result {
+                        eprintln!("system tray action failed: {error}");
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray.build(app)?;
 
             if let Err(error) = app::apply_current_view(app.handle()) {
                 eprintln!("failed to apply initial view state: {error}");

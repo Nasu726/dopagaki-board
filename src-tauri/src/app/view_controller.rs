@@ -50,6 +50,7 @@ fn apply_view_state(app: &AppHandle, view: ViewState) -> Result<(), String> {
             window
                 .set_decorations(false)
                 .map_err(|error| format!("failed to remove window decorations: {error}"))?;
+            set_native_shadow(&window, false)?;
             window
                 .set_resizable(false)
                 .map_err(|error| format!("failed to lock Idle size: {error}"))?;
@@ -64,6 +65,7 @@ fn apply_view_state(app: &AppHandle, view: ViewState) -> Result<(), String> {
             window
                 .set_decorations(false)
                 .map_err(|error| format!("failed to remove window decorations: {error}"))?;
+            set_native_shadow(&window, true)?;
             window
                 .set_resizable(false)
                 .map_err(|error| format!("failed to lock Compact size: {error}"))?;
@@ -81,6 +83,7 @@ fn apply_view_state(app: &AppHandle, view: ViewState) -> Result<(), String> {
             window
                 .set_decorations(false)
                 .map_err(|error| format!("failed to remove window decorations: {error}"))?;
+            set_native_shadow(&window, true)?;
             window
                 .set_resizable(true)
                 .map_err(|error| format!("failed to enable Board resizing: {error}"))?;
@@ -95,4 +98,18 @@ fn apply_view_state(app: &AppHandle, view: ViewState) -> Result<(), String> {
                 .map_err(|error| format!("failed to focus Board window: {error}"))
         }
     }
+}
+
+fn set_native_shadow(window: &tauri::WebviewWindow, enabled: bool) -> Result<(), String> {
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        window
+            .set_shadow(enabled)
+            .map_err(|error| format!("failed to update native window shadow: {error}"))?;
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let _ = (window, enabled);
+
+    Ok(())
 }

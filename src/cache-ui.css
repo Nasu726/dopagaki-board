@@ -99,13 +99,21 @@
   color: rgba(255, 255, 255, 0.82);
 }
 
+.board-widget {
+  container-name: board-widget;
+  container-type: size;
+}
+
 .board-widget__content {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
-  grid-auto-rows: minmax(58px, auto);
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(clamp(130px, 38cqw, 220px), 100%), 1fr)
+  );
+  grid-auto-rows: minmax(clamp(48px, 20cqh, 86px), auto);
   align-content: start;
-  gap: 5px;
-  padding: 5px;
+  gap: clamp(4px, 1.1cqw, 9px);
+  padding: clamp(4px, 1.1cqw, 9px);
 }
 
 .board-feed-item {
@@ -113,12 +121,12 @@
   display: flex;
   align-items: center;
   min-width: 0;
-  min-height: 58px;
-  gap: 7px;
+  min-height: clamp(48px, 20cqh, 86px);
+  gap: clamp(5px, 1.5cqw, 11px);
   overflow: hidden;
-  padding: 7px;
+  padding: clamp(5px, 1.5cqw, 11px);
   border: 0;
-  border-radius: 9px;
+  border-radius: clamp(8px, 2cqw, 12px);
   color: #303743;
   background: white;
   text-align: left;
@@ -130,10 +138,10 @@
 }
 
 .board-feed-item__image {
-  flex: 0 0 46px;
-  width: 46px;
-  height: 46px;
-  border-radius: 7px;
+  flex: 0 0 clamp(36px, min(14cqw, 16cqh), 68px);
+  width: clamp(36px, min(14cqw, 16cqh), 68px);
+  height: clamp(36px, min(14cqw, 16cqh), 68px);
+  border-radius: clamp(6px, 1.5cqw, 10px);
   object-fit: cover;
   background: #e9edf2;
 }
@@ -142,13 +150,13 @@
   display: grid;
   flex: 1 1 auto;
   min-width: 0;
-  gap: 2px;
+  gap: clamp(2px, 0.55cqh, 5px);
 }
 
 .board-feed-item__title {
   display: -webkit-box;
   overflow: hidden;
-  font-size: 10px;
+  font-size: clamp(9px, 2.8cqw, 13px);
   font-weight: 680;
   line-height: 1.25;
   -webkit-box-orient: vertical;
@@ -158,9 +166,39 @@
 .board-feed-item__meta {
   overflow: hidden;
   color: #8a929d;
-  font-size: 9px;
+  font-size: clamp(8px, 2.1cqw, 10px);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@container board-widget (max-height: 145px) {
+  .board-widget__content {
+    grid-auto-rows: minmax(42px, auto);
+  }
+
+  .board-feed-item {
+    min-height: 42px;
+  }
+
+  .board-feed-item__image {
+    flex-basis: 34px;
+    width: 34px;
+    height: 34px;
+  }
+
+  .board-feed-item__title {
+    -webkit-line-clamp: 2;
+  }
+
+  .board-feed-item__meta {
+    display: none;
+  }
+}
+
+@container board-widget (min-width: 420px) and (min-height: 260px) {
+  .board-feed-item__title {
+    -webkit-line-clamp: 4;
+  }
 }
 
 .board-widget__empty {

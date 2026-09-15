@@ -158,6 +158,20 @@ async function submitWidgetSettings(
   errorElement.textContent = "";
   errorElement.hidden = true;
 
+  let input: WidgetSettingsSaveInput;
+  try {
+    input = {
+      sourceConfigJson: source.serialize(),
+      refreshConfigJson: refresh.serialize(),
+    };
+  } catch (error) {
+    if (form.isConnected) {
+      errorElement.textContent = getErrorMessage(error);
+      errorElement.hidden = false;
+    }
+    return;
+  }
+
   const controls: Array<SourceControl | HTMLButtonElement> = [
     ...source.controls,
     ...refresh.controls,
@@ -170,9 +184,7 @@ async function submitWidgetSettings(
   form.setAttribute("aria-busy", "true");
 
   try {
-    const sourceConfigJson = source.serialize();
-    const refreshConfigJson = refresh.serialize();
-    await onSave({ sourceConfigJson, refreshConfigJson }, dismiss);
+    await onSave(input, dismiss);
     if (form.isConnected) {
       dismiss();
     }

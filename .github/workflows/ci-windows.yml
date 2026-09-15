@@ -29,6 +29,14 @@ jobs:
         shell: pwsh
         run: ./scripts/decode_windows_icon.ps1
 
+      - name: Check Windows performance helper syntax
+        shell: pwsh
+        run: '[void][scriptblock]::Create((Get-Content -Raw ./scripts/measure_idle_windows.ps1))'
+
+      - name: Smoke Windows performance helper
+        shell: pwsh
+        run: ./scripts/measure_idle_windows.ps1 -RootPid $PID -SettleSeconds 0 -DurationSeconds 0.2 -IntervalSeconds 0.1
+
       - name: Install frontend dependencies
         run: npm ci
 

@@ -2,17 +2,7 @@
 
 This file records reproducible performance observations for the permanently resident app. Do not optimize from intuition alone; update this document whenever a meaningful architectural change affects startup, idle behavior, memory, or responsiveness.
 
-## Target budget
-
-Initial targets are documented in `PERFORMANCE.md`. The most important product rule is simpler: when nothing useful is due, the app should do essentially nothing.
-
-Current engineering budgets:
-
-- idle CPU average: target `<= 0.1%`; sustained `>= 0.5%` requires investigation
-- summed app-process RSS: target `<= 150 MiB`; stretch target `<= 100 MiB`
-- network while truly idle: `0 B/s`
-- cached startup to usable UI: target around `<= 500 ms`; persistent `> 1 s` requires investigation
-- background work must not visibly stall drag, resize, scroll, shortcut handling, or clicks
+Performance budgets, priorities, and regression-response policy are owned by `PERFORMANCE.md`. This file owns measurement definitions, procedures, conditions, and observed results; use the same definitions across runs so comparisons remain meaningful.
 
 ## First real Windows observation — 2026-09-14
 
@@ -138,7 +128,3 @@ The same conceptual rules apply even when the Linux helper cannot be used:
 - ensure no source refresh is due/running during the idle sample
 
 Use Task Manager / Resource Monitor or equivalent tooling on Windows and Activity Monitor or equivalent tooling on macOS. If these platforms are later automated, preserve the same metric definitions rather than inventing incompatible ones.
-
-## Regression rule
-
-If a new feature materially increases permanent idle cost, first try deletion, deferral, lazy loading, event-driven work, or dependency removal. A feature being useful is not by itself sufficient justification for making a resident app heavy.

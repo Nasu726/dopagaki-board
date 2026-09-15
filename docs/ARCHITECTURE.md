@@ -13,32 +13,13 @@ A native rewrite is not a goal by itself. Consider platform-native UIs only if m
 
 The frontend owns rendering, accessibility, widget-local forms, and pointer interaction. Rust owns or mediates source adapters, HTTP/RSS/API access, SQLite, canonical source identity, cache semantics, scheduling/backoff, recommendation/ranking, external launch, and persistent application/shell state.
 
-## Current module shape
+## Internal boundaries
 
 Keep meaningful boundaries, but do not create forwarding-only abstractions.
 
-```text
-src-tauri/src/
-  app/
-  commands/
-  db/
-  sources/
-    arxiv.rs
-    wikipedia.rs
-    qiita.rs
-    zenn.rs
-    youtube.rs
-    mod.rs
-  refresh_policy.rs
-  refresh_settings.rs
-  runtime.rs
-  scheduler.rs
-  source_config.rs
-  lib.rs
-  main.rs
-```
+The Rust core separates deterministic scheduling/policy from runtime integration, persistence, source-specific adapter behavior, canonical source configuration, and Tauri command/shell concerns. Those boundaries matter because scheduler decisions must remain testable without HTTP/SQLite/Tauri, while adapter validation and runtime side effects remain explicit.
 
-The frontend is intentionally framework-free. `src/main.ts` currently owns the small application presentation/state wiring and uses focused helpers such as `board-grid.ts`; split further when a concern has a clear boundary, not merely to satisfy a file-size target.
+The frontend is intentionally framework-free. Keep application state and Tauri orchestration visible, while extracting cohesive presentation concerns when they gain a clear independent boundary. Do not split files solely to satisfy a size target.
 
 ## Cache-first startup
 

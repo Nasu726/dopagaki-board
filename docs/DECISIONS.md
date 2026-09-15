@@ -59,20 +59,7 @@ From Compact, external launch automatically collapses the app back to Idle. From
 
 ### Board layout
 
-Board is a **responsive virtual grid**, currently 12 columns × 8 rows. The grid is a geometry model and does not need visible grid lines.
-
-- a widget is a rectangle whose opposite corners lie on grid intersections
-- persisted x/y/width/height are logical integer grid units
-- widget pixel geometry scales with the Board window
-- widgets can use different integer grid sizes
-- dragging snaps the whole widget to grid coordinates
-- every edge and corner is a resize target
-- widget rectangles must not overlap
-- during drag/resize, a colliding candidate is rejected and the widget stays at the last valid geometry
-- clicking empty Board space creates a widget at/near that location, using the nearest free rectangle when necessary
-- legacy pixel layouts are converted once when loaded and persisted in grid units
-
-Grid alignment keeps direct manipulation predictable while preserving user-authored spatial layout.
+Use a responsive **12×8 logical integer grid** so persisted widget geometry scales with the Board window while preserving user-authored spatial layout. Widgets snap to grid coordinates, may use different sizes, never overlap, and do not implicitly push/reflow neighbors. Detailed interaction rules belong in the product/UX specification.
 
 ### Compact priority
 
@@ -90,27 +77,9 @@ Presentation is source-specific. arXiv is title-centric; image-centric sources u
 
 ### YouTube integration strategy
 
-Use **public selected-channel RSS as the baseline transport**, then add YouTube Data API capabilities incrementally.
+Use **public selected-channel RSS as the no-key baseline**. Optional YouTube Data API support is additive, uses a user-supplied key rather than a shared application key, and must preserve RSS fallback where applicable.
 
-Current/near-term behavior:
-
-- selected-channel new-video monitoring uses public RSS and remains usable without a Google API key
-- YouTube widgets are configured around a channel ID and bounded result count
-- adding a YouTube widget immediately opens its source configuration
-- cancelling that first configuration keeps the newly created widget so setup can be retried without recreating placement
-- an unconfigured YouTube widget remains dormant rather than being treated as a failed network refresh/backoff condition
-- the UI provides lightweight channel-ID guidance; Data API support adds handle/URL resolution
-- automatic RSS refresh uses the existing source floor and scheduler/cache boundaries
-
-Data API rollout:
-
-- API use is optional and additive; RSS remains the fallback when no API key is configured, quota is exhausted, or the API is unavailable
-- each user supplies their own YouTube Data API key; the desktop application does not ship a shared project key
-- first API uses are high-value/low-frequency operations such as resolving `@handle` to a channel ID, validating channels, enriching visible/cached video metadata, and selectively broadening recommendation candidates
-- API enrichment fetches data only when it is useful to current product behavior
-- recommendation/ranking remains application-owned; candidate sets come from available public/API sources and the app applies its transparent heuristic layer
-- authenticated/private-account features are a later phase; OAuth setup should reduce Google authorization to a few guided clicks and enable features such as subscription-aware discovery
-- credential storage, quota accounting, cache/refresh rules for API-derived data, and OAuth scopes require explicit design before those phases ship
+Use API calls only for bounded, high-value capabilities such as handle resolution, validation, useful metadata enrichment, or candidate discovery. OAuth/private-account features come later and require explicit credential/scope/retention decisions before shipping. Recommendation/ranking remains application-owned rather than modeling YouTube's Home feed as an available API.
 
 ### Shortcut and settings
 

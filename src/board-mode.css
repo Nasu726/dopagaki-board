@@ -1,0 +1,52 @@
+.board-mode-switch {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: #e8eaee;
+}
+
+.board-mode-button {
+  min-width: 48px;
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  color: #687181;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.board-mode-button:hover {
+  color: #252b36;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.board-mode-button[aria-pressed="true"] {
+  color: #202631;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(31, 41, 57, 0.12);
+}
+
+.board-canvas--add {
+  cursor: crosshair;
+}
+
+.board-canvas--add .board-widget__drag {
+  cursor: default;
+}
+
+.board-canvas--add .board-widget__resize {
+  pointer-events: none;
+}
+
+.board-canvas--empty.board-canvas--select::after {
+  content: "Choose Add to place your first source";
+}
+
+.board-canvas--empty.board-canvas--add::after {
+  content: "Click anywhere to place your first source";
+}

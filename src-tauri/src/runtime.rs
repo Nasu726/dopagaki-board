@@ -513,7 +513,7 @@ mod tests {
         let key = source_key("arxiv".to_owned(), "{}".to_owned()).expect("source key should parse");
         let widget_sources = vec![
             (1, "{}".to_owned()),
-            (2, r#"{"query":"cat:cs.AI","maxResults":12}"#.to_owned()),
+            (2, r#"{"query":"cat:cs.AI","maxResults":3}"#.to_owned()),
             (3, r#"{"query":"cat:cs.LG"}"#.to_owned()),
         ];
 

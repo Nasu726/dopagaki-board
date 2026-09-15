@@ -76,7 +76,7 @@ Use the release executable and the repository PowerShell helper. The helper uses
 
 ```powershell
 npm ci
-npm run tauri build
+npm run tauri build -- --no-bundle
 
 $app = Start-Process .\src-tauri\target\release\dopagaki-board.exe -PassThru
 .\scripts\measure_idle_windows.ps1 `

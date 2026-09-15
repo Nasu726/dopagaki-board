@@ -1,10 +1,10 @@
 export const REFRESH_SLIDER_MAX = 100;
-export const MIN_AUTO_REFRESH_SECONDS = 5 * 60;
-export const MAX_AUTO_REFRESH_SECONDS = 24 * 60 * 60;
-export const DEFAULT_AUTO_REFRESH_SECONDS = 60 * 60;
+export const MIN_AUTO_REFRESH_SECONDS = 300;
+export const MAX_AUTO_REFRESH_SECONDS = 86400;
+export const DEFAULT_AUTO_REFRESH_SECONDS = 3600;
 
-// Presentation mirror of the Rust source-policy floors. A Rust regression test
-// reads these explicit values so changing one side without the other fails CI.
+// Presentation mirror of the Rust refresh policy. A Rust regression test reads
+// these explicit values so changing one side without the other fails CI.
 const SOURCE_AUTO_REFRESH_FLOOR_SECONDS: Record<string, number> = {
   arxiv: 86400,
   wikipedia: 21600,

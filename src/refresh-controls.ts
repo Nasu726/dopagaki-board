@@ -3,12 +3,14 @@ export const MIN_AUTO_REFRESH_SECONDS = 5 * 60;
 export const MAX_AUTO_REFRESH_SECONDS = 24 * 60 * 60;
 export const DEFAULT_AUTO_REFRESH_SECONDS = 60 * 60;
 
+// Presentation mirror of the Rust source-policy floors. A Rust regression test
+// reads these explicit values so changing one side without the other fails CI.
 const SOURCE_AUTO_REFRESH_FLOOR_SECONDS: Record<string, number> = {
-  arxiv: 24 * 60 * 60,
-  wikipedia: 6 * 60 * 60,
-  qiita: 60 * 60,
-  zenn: 60 * 60,
-  youtube: 60 * 60,
+  arxiv: 86400,
+  wikipedia: 21600,
+  qiita: 3600,
+  zenn: 3600,
+  youtube: 3600,
 };
 
 export function sourceAutoRefreshFloorSeconds(sourceKind: string): number {

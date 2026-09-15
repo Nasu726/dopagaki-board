@@ -1,3 +1,4 @@
+use super::http::{fetch_text, SourceFetchError};
 use crate::{db::cache::CacheWriteItem, source_config};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -51,33 +52,25 @@ pub(crate) async fn fetch(
     http: &reqwest::Client,
     canonical_source_config_json: &str,
     fetched_at: i64,
-) -> Result<Vec<CacheWriteItem>, String> {
-    let config = parse_config(canonical_source_config_json)?;
+) -> Result<Vec<CacheWriteItem>, SourceFetchError> {
+    let config = parse_config(canonical_source_config_json)
+        .map_err(|error| SourceFetchError::invalid_config("Wikipedia", error))?;
     let endpoint = format!("https://{}.wikipedia.org/w/api.php", config.language);
     let limit = config.max_results.to_string();
-    let response = http
-        .get(endpoint)
-        .query(&[
-            ("action", "query"),
-            ("format", "json"),
-            ("formatversion", "2"),
-            ("generator", "random"),
-            ("grnnamespace", "0"),
-            ("grnlimit", limit.as_str()),
-            ("prop", "pageimages"),
-            ("piprop", "thumbnail"),
-            ("pithumbsize", "640"),
-        ])
-        .send()
-        .await
-        .map_err(|error| format!("Wikipedia request failed: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("Wikipedia returned an error status: {error}"))?;
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("failed to read Wikipedia response: {error}"))?;
+    let request = http.get(endpoint).query(&[
+        ("action", "query"),
+        ("format", "json"),
+        ("formatversion", "2"),
+        ("generator", "random"),
+        ("grnnamespace", "0"),
+        ("grnlimit", limit.as_str()),
+        ("prop", "pageimages"),
+        ("piprop", "thumbnail"),
+        ("pithumbsize", "640"),
+    ]);
+    let body = fetch_text(request, "Wikipedia").await?;
     parse_response(&body, &config, canonical_source_config_json, fetched_at)
+        .map_err(|error| SourceFetchError::decode("Wikipedia", error))
 }
 
 pub(crate) fn normalize_config(input: &str) -> Result<String, String> {

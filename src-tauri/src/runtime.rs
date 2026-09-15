@@ -4,7 +4,7 @@ use crate::{
     db::{self, refresh_state::SourceRefreshState},
     refresh_policy, refresh_settings,
     scheduler::SourceKey,
-    sources::{self, arxiv::ArxivClient},
+    sources::{self, arxiv::ArxivClient, http::SourceFetchError},
 };
 use rusqlite::Connection;
 use serde::Serialize;
@@ -286,7 +286,10 @@ async fn run_refresh(
         return;
     }
 
-    let result = match key.source_kind.as_str() {
+    let result: Result<Vec<db::cache::CacheWriteItem>, SourceFetchError> = match key
+        .source_kind
+        .as_str()
+    {
         "arxiv" => arxiv.fetch(&key.source_config_json, attempt_started).await,
         "wikipedia" => {
             sources::wikipedia::fetch(&public_http, &key.source_config_json, attempt_started).await
@@ -300,7 +303,10 @@ async fn run_refresh(
         "youtube" => {
             sources::youtube::fetch(&public_http, &key.source_config_json, attempt_started).await
         }
-        other => Err(format!("no refresh adapter is implemented for {other}")),
+        other => Err(SourceFetchError::other(
+            other,
+            "no refresh adapter is implemented",
+        )),
     };
 
     match result {
@@ -312,7 +318,12 @@ async fn run_refresh(
         }
         Err(error) => {
             eprintln!("{} refresh failed: {error}", key.source_kind);
-            finish_failure(&app, &key, &error);
+            finish_failure_with_retry_floor(
+                &app,
+                &key,
+                &error.to_string(),
+                error.retry_floor_seconds(),
+            );
         }
     }
 }
@@ -408,6 +419,15 @@ fn finish_success(
 }
 
 fn finish_failure(app: &AppHandle, key: &SourceKey, reason: &str) {
+    finish_failure_with_retry_floor(app, key, reason, None);
+}
+
+fn finish_failure_with_retry_floor(
+    app: &AppHandle,
+    key: &SourceKey,
+    reason: &str,
+    retry_floor_seconds: Option<u64>,
+) {
     let now = unix_seconds().unwrap_or(0);
     let state = app.state::<AppState>();
     let failure_state = {
@@ -419,7 +439,7 @@ fn finish_failure(app: &AppHandle, key: &SourceKey, reason: &str) {
                 return;
             }
         };
-        scheduler.complete_failure(key, now);
+        scheduler.complete_failure_with_retry_floor(key, now, retry_floor_seconds);
         scheduler.failure_state(key)
     };
 

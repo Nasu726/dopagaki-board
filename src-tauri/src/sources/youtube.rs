@@ -1,3 +1,4 @@
+use super::http::{fetch_text, SourceFetchError};
 use crate::{db::cache::CacheWriteItem, source_config};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -47,29 +48,23 @@ pub(crate) async fn fetch(
     http: &reqwest::Client,
     canonical_source_config_json: &str,
     fetched_at: i64,
-) -> Result<Vec<CacheWriteItem>, String> {
-    let config = parse_config(canonical_source_config_json)?;
+) -> Result<Vec<CacheWriteItem>, SourceFetchError> {
+    let config = parse_config(canonical_source_config_json)
+        .map_err(|error| SourceFetchError::invalid_config("YouTube RSS", error))?;
     if config.channel_id.is_empty() {
         return Ok(Vec::new());
     }
-    let response = http
+    let request = http
         .get("https://www.youtube.com/feeds/videos.xml")
-        .query(&[("channel_id", config.channel_id.as_str())])
-        .send()
-        .await
-        .map_err(|error| format!("YouTube RSS request failed: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("YouTube RSS returned an error status: {error}"))?;
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("failed to read YouTube RSS: {error}"))?;
+        .query(&[("channel_id", config.channel_id.as_str())]);
+    let body = fetch_text(request, "YouTube RSS").await?;
     parse_feed(
         &body,
         config.max_results,
         canonical_source_config_json,
         fetched_at,
     )
+    .map_err(|error| SourceFetchError::decode("YouTube RSS", error))
 }
 
 pub(crate) fn normalize_config(input: &str) -> Result<String, String> {

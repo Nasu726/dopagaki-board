@@ -1,4 +1,5 @@
 pub(crate) mod arxiv;
+pub(crate) mod http;
 pub(crate) mod qiita;
 pub(crate) mod wikipedia;
 pub(crate) mod youtube;
@@ -71,7 +72,7 @@ mod tests {
         for kind in supported_kinds() {
             assert!(is_supported(kind));
         }
-        assert!(!is_supported("nhk"));
+        assert!(!is_supported("unsupported"));
     }
 
     #[test]

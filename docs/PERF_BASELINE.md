@@ -70,11 +70,35 @@ The helper reports:
 
 A subprocess that starts and exits entirely between two `/proc` samples can be missed. If process churn is visible or suspected, repeat with a shorter interval such as `--interval 0.25`. Do not increase sampling frequency permanently unless the extra precision is needed.
 
+## Canonical Windows idle measurement
+
+Use the release executable and the repository PowerShell helper. The helper uses only built-in PowerShell/.NET and Windows process information; it is a development measurement tool, not part of the resident app.
+
+```powershell
+npm ci
+npm run tauri build
+
+$app = Start-Process .\src-tauri\target\release\dopagaki-board.exe -PassThru
+.\scripts\measure_idle_windows.ps1 `
+  -RootPid $app.Id `
+  -SettleSeconds 60 `
+  -DurationSeconds 300 `
+  -IntervalSeconds 1 `
+  -CsvPath "$env:TEMP\dopagaki-idle.csv"
+```
+
+During the settle and sample windows, use the same idle conditions as the Linux run: keep the app in Idle, do not interact, and ensure no source refresh is due or running.
+
+The helper recursively follows `Win32_Process` parent IDs from the Tauri root process so WebView2/helper descendants are included when they remain in that process tree. It reports:
+
+- **CPU percent** from summed `TotalProcessorTime` deltas. One fully occupied logical CPU is `100%`, matching the Linux helper's convention; a multi-process tree can exceed `100%`.
+- **Working-set sum** from `WorkingSet64` for the sampled process tree. Treat this as the Windows measurement series; it is not PSS and should not be silently substituted for the Linux RSS/PSS series.
+
+A process that starts and exits entirely between two samples can be missed. If process churn is visible, repeat with a shorter `-IntervalSeconds` value. Do not shorten the interval permanently without a measurement reason.
+
 ## Network-idle verification
 
-`scripts/measure_idle_linux.py` deliberately does **not** report per-process network bytes. `/proc/<pid>/net/dev` describes the process's network namespace rather than traffic attributable to that PID; treating it as per-process traffic would produce false measurements.
-
-Verify app-attributable traffic separately with an OS tool that can attribute network activity to processes (for example `nethogs` if already installed) or a suitable system monitor. Record the tool and observation. Do not add a permanent runtime dependency merely to measure this.
+Neither resident measurement helper claims app-attributable network bytes. Verify app-attributable traffic separately with an OS tool that can attribute network activity to processes: for example `nethogs` on Linux when already installed, or Resource Monitor on Windows. Record the tool and observation. Do not add a permanent runtime dependency merely to measure this.
 
 A valid "truly idle" network run must have no due refresh. Network activity caused by an intentionally due refresh is background-work cost, not an idle-network regression.
 
@@ -113,11 +137,13 @@ network measurement tool:
 notes:
 ```
 
-Do not compare numbers collected under materially different build modes, active refresh state, or measurement definitions as if they were one regression series.
+On Windows, fields such as kernel/desktop environment/session can be recorded as `n/a` where they do not describe the platform meaningfully; record the Windows version/build instead.
 
-## Windows and macOS canonical runs
+Do not compare numbers collected under materially different build modes, active refresh state, process-tree definitions, or measurement definitions as if they were one regression series.
 
-The same conceptual rules apply even when the Linux helper cannot be used:
+## macOS canonical runs
+
+Use the same conceptual rules even though the Linux/Windows helpers do not apply directly:
 
 - release build only
 - 60 s settle, then 5 min sustained Idle sampling
@@ -127,4 +153,4 @@ The same conceptual rules apply even when the Linux helper cannot be used:
 - verify idle network separately
 - ensure no source refresh is due/running during the idle sample
 
-Use Task Manager / Resource Monitor or equivalent tooling on Windows and Activity Monitor or equivalent tooling on macOS. If these platforms are later automated, preserve the same metric definitions rather than inventing incompatible ones.
+Use Activity Monitor or an equivalent tool. If macOS is later automated, preserve the same metric definitions rather than inventing an incompatible series.

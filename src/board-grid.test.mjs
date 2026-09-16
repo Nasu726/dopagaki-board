@@ -120,8 +120,11 @@ test("persisted undersized logical geometry remains logical and can expand when 
 });
 
 test("over-capacity legacy layouts can preserve an undersized non-overlapping fallback", () => {
-  const persisted = legacyPixelsToGrid({ x: 9, y: 6, width: 2, height: 1 });
-  const occupied = [{ x: 0, y: 0, width: GRID_COLUMNS, height: 6 }];
+  const persisted = legacyPixelsToGrid({ x: 10, y: 7, width: 2, height: 1 });
+  const occupied = [
+    { x: 0, y: 0, width: GRID_COLUMNS, height: 7 },
+    { x: 0, y: 7, width: 10, height: 1 },
+  ];
   assert.equal(findNearestFreeRect(persisted, occupied), null);
   assert.equal(collides(persisted, occupied), false);
 });

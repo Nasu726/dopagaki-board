@@ -29,7 +29,7 @@ export const DEFAULT_QIITA_QUERY = "";
 export const DEFAULT_QIITA_MAX_RESULTS = 3;
 export const DEFAULT_ZENN_FEED_TYPE: ZennFeedType = "trend";
 export const DEFAULT_ZENN_MAX_RESULTS = 3;
-export const DEFAULT_YOUTUBE_CHANNEL_ID = "";
+export const DEFAULT_YOUTUBE_CHANNEL = "";
 export const DEFAULT_YOUTUBE_MAX_RESULTS = 1;
 
 export function readQuerySourceConfig(
@@ -109,7 +109,7 @@ export function readYouTubeConfig(sourceConfigJson: string): YouTubeSourceConfig
         ? parsed.channel
         : typeof parsed.channelId === "string"
           ? parsed.channelId
-          : DEFAULT_YOUTUBE_CHANNEL_ID;
+          : DEFAULT_YOUTUBE_CHANNEL;
     return {
       channel,
       maxResults:
@@ -119,7 +119,7 @@ export function readYouTubeConfig(sourceConfigJson: string): YouTubeSourceConfig
     };
   } catch {
     return {
-      channel: DEFAULT_YOUTUBE_CHANNEL_ID,
+      channel: DEFAULT_YOUTUBE_CHANNEL,
       maxResults: DEFAULT_YOUTUBE_MAX_RESULTS,
     };
   }
@@ -140,7 +140,7 @@ export function normalizeYouTubeChannelInput(value: string): string | null {
     /^(?:https?:\/\/(?:www\.)?youtube\.com\/)?(@[^\s\/?#]+)(?:[\/?#].*)?$/i,
   );
   if (handleMatch?.[1]) {
-    return handleMatch[1].toLocaleLowerCase();
+    return handleMatch[1].toLowerCase();
   }
 
   const legacyUrlMatch = trimmed.match(

@@ -25,7 +25,6 @@ import {
   sourceAutoRefreshFloorSeconds,
   widgetRefreshConfigJson,
 } from "./refresh-controls";
-import "./ui-runtime";
 
 export type WidgetSettingsTarget = {
   sourceKind: string;

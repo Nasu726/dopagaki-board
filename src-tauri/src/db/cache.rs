@@ -119,18 +119,6 @@ fn active_source_keys(connection: &Connection) -> Result<Vec<(String, String)>> 
     Ok(keys.into_iter().collect())
 }
 
-pub(crate) fn mark_active_widget_items_seen(connection: &Connection) -> Result<usize> {
-    let source_keys = active_source_keys(connection)?;
-    let mut statement = connection.prepare(
-        "UPDATE feed_items\n         SET is_unseen = 0\n         WHERE is_unseen = 1 AND source_kind = ?1 AND source_config_json = ?2",
-    )?;
-    let mut changed = 0;
-    for (source_kind, source_config_json) in source_keys {
-        changed += statement.execute(params![source_kind, source_config_json])?;
-    }
-    Ok(changed)
-}
-
 pub(crate) fn has_unseen(connection: &Connection) -> Result<bool> {
     let source_keys = active_source_keys(connection)?;
     let mut statement = connection.prepare(
@@ -226,10 +214,8 @@ mod tests {
         .expect("legacy explicit defaults should persist");
         assert!(has_unseen(&connection).expect("semantic default source should notify"));
 
-        assert_eq!(
-            mark_active_widget_items_seen(&connection).expect("Board acknowledgement should work"),
-            1
-        );
+        mark_seen(&connection, &["2401.00001".to_owned()])
+            .expect("visible Board item should become seen");
         assert!(!has_unseen(&connection).expect("active cache should now be seen"));
 
         let orphaned_unseen: i64 = connection

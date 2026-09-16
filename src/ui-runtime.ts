@@ -1,7 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const appWindow = getCurrentWindow();
-const appRoot = document.querySelector<HTMLElement>("#app");
 
 function isInteractiveTarget(target: Element): boolean {
   return Boolean(
@@ -9,37 +8,6 @@ function isInteractiveTarget(target: Element): boolean {
       "button, input, select, textarea, a, [contenteditable='true'], [role='button']",
     ),
   );
-}
-
-function markResizeHandlesPointerOnly(root: ParentNode): void {
-  const handles: HTMLElement[] = [];
-  if (root instanceof HTMLElement && root.matches("[data-resize-handle]")) {
-    handles.push(root);
-  }
-  handles.push(...root.querySelectorAll<HTMLElement>("[data-resize-handle]"));
-
-  for (const handle of handles) {
-    handle.tabIndex = -1;
-    handle.setAttribute("aria-hidden", "true");
-  }
-}
-
-const resizeHandleRoot: ParentNode = appRoot ?? document;
-markResizeHandlesPointerOnly(resizeHandleRoot);
-
-// Full view renders replace #app's direct child. Scan that newly inserted view once
-// rather than observing every descendant mutation in the application DOM.
-if (appRoot) {
-  const resizeObserver = new MutationObserver((records) => {
-    for (const record of records) {
-      for (const node of record.addedNodes) {
-        if (node instanceof HTMLElement) {
-          markResizeHandlesPointerOnly(node);
-        }
-      }
-    }
-  });
-  resizeObserver.observe(appRoot, { childList: true });
 }
 
 document.addEventListener(
@@ -68,20 +36,3 @@ document.addEventListener(
   },
   true,
 );
-
-document.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof Element)) {
-    return;
-  }
-  const content = target.closest<HTMLElement>("[data-widget-content]");
-  if (!content || !content.closest(".board-widget--youtube")) {
-    return;
-  }
-  if (!content.querySelector(".board-widget__empty")) {
-    return;
-  }
-
-  const widget = content.closest<HTMLElement>("[data-widget-id]");
-  widget?.querySelector<HTMLButtonElement>("[data-config-widget]")?.click();
-});

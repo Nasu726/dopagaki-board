@@ -25,6 +25,7 @@ import {
   sourceAutoRefreshFloorSeconds,
   widgetRefreshConfigJson,
 } from "./refresh-controls";
+import "./ui-runtime";
 
 export type WidgetSettingsTarget = {
   sourceKind: string;
@@ -82,6 +83,8 @@ export function openWidgetSettings(
   const form = document.createElement("form");
   form.className = "board-widget-config";
   form.dataset.widgetConfigEditor = "";
+  form.setAttribute("role", "dialog");
+  form.setAttribute("aria-modal", "true");
   form.setAttribute("aria-label", `${label} widget settings`);
   form.addEventListener("pointerdown", (event) => event.stopPropagation());
   form.addEventListener("click", (event) => event.stopPropagation());
@@ -133,7 +136,8 @@ export function openWidgetSettings(
     errorElement,
     actions,
   );
-  host.append(form);
+  const portal = document.querySelector<HTMLElement>(".board-shell") ?? host;
+  portal.append(form);
   source.focusTarget.focus();
   if (source.selectFocusText && source.focusTarget instanceof HTMLInputElement) {
     source.focusTarget.select();
@@ -363,12 +367,12 @@ function createYouTubeFields(widget: WidgetSettingsTarget): SourceFields {
   const config = readYouTubeConfig(widget.sourceConfigJson);
   const channelInput = document.createElement("input");
   channelInput.type = "text";
-  channelInput.value = config.channelId;
+  channelInput.value = config.channel;
   channelInput.maxLength = 256;
   channelInput.autocomplete = "off";
   channelInput.spellcheck = false;
   channelInput.required = true;
-  channelInput.placeholder = "UC... or youtube.com/channel/UC...";
+  channelInput.placeholder = "@handle or youtube.com/@handle";
 
   const countInput = createCountInput(config.maxResults, 15);
   return {
@@ -376,20 +380,20 @@ function createYouTubeFields(widget: WidgetSettingsTarget): SourceFields {
       createField("Channel", channelInput),
       createCountField(countInput),
       createHelp(
-        "Paste a UC-prefixed channel ID or a YouTube /channel/UC... URL. Automatic @handle lookup will be added with optional Data API support; RSS itself needs no API key.",
+        "Paste the channel page URL from your browser, or its @handle. No API key is required.",
       ),
     ],
     controls: [channelInput, countInput],
     focusTarget: channelInput,
     selectFocusText: true,
     serialize: () => {
-      const channelId = normalizeYouTubeChannelInput(channelInput.value);
-      if (!channelId) {
+      const channel = normalizeYouTubeChannelInput(channelInput.value);
+      if (!channel) {
         channelInput.focus();
-        throw new Error("Enter a valid UC... channel ID or a YouTube /channel/UC... URL.");
+        throw new Error("Paste a YouTube channel URL or @handle.");
       }
       return JSON.stringify({
-        channelId,
+        channel,
         maxResults: Number(countInput.value),
       });
     },

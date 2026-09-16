@@ -214,10 +214,12 @@
 
 /*
  * Widget configuration is a focused Board task, not part of the widget's
- * content layout. Temporarily release the widget containment so its existing
- * form can use the WebView as a dedicated modal-sized surface.
+ * content layout. Release widget containment and hover stacking while its
+ * fixed editor is open so the editor participates in the root stacking
+ * context above the Board-level backdrop.
  */
 .board-widget:has(> .board-widget-config) {
+  z-index: auto;
   container-type: normal;
   overflow: visible;
 }

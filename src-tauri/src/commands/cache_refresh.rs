@@ -1,6 +1,6 @@
 use super::publish_shell_status;
 use crate::{
-    app::{AppState, ShellStatus},
+    app::{AppState, ShellStatus, ViewState},
     db::{self, cache::CachedItem},
     refresh_policy, refresh_settings, runtime, sources,
 };
@@ -195,6 +195,7 @@ pub(crate) fn list_cached_items_for_source(
     source_config_json: String,
     limit: Option<usize>,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<Vec<CachedItem>, String> {
     let limit = validate_cache_limit(limit.unwrap_or(DEFAULT_CACHE_LIMIT))?;
     if source_kind.trim().is_empty() || source_kind.len() > 64 {
@@ -202,12 +203,62 @@ pub(crate) fn list_cached_items_for_source(
     }
     let source_config_json = sources::normalize_config(&source_kind, &source_config_json)?;
 
-    let connection = state
-        .db
+    let mut items = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
+        db::cache::list_for_source(&connection, &source_kind, &source_config_json, limit)
+            .map_err(|error| format!("failed to read source cache: {error}"))?
+    };
+
+    let board_visible = state
+        .view
         .lock()
-        .map_err(|_| "database lock was poisoned".to_owned())?;
-    db::cache::list_for_source(&connection, &source_kind, &source_config_json, limit)
-        .map_err(|error| format!("failed to read source cache: {error}"))
+        .map(|view| *view == ViewState::Board)
+        .map_err(|_| "view state lock was poisoned".to_owned())?;
+    if !board_visible {
+        return Ok(items);
+    }
+
+    let has_unseen = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
+        let unseen_ids: Vec<String> = items
+            .iter()
+            .filter(|item| item.is_unseen)
+            .map(|item| item.id.clone())
+            .collect();
+        if !unseen_ids.is_empty() {
+            db::cache::mark_seen(&connection, &unseen_ids)
+                .map_err(|error| format!("failed to mark Board cache seen: {error}"))?;
+        }
+        db::cache::has_unseen(&connection)
+            .map_err(|error| format!("failed to read unseen cache state: {error}"))?
+    };
+
+    let shell_update = {
+        let mut shell = state
+            .shell
+            .lock()
+            .map_err(|_| "shell status lock was poisoned".to_owned())?;
+        if shell.has_unseen == has_unseen {
+            None
+        } else {
+            shell.has_unseen = has_unseen;
+            Some(shell.clone())
+        }
+    };
+    if let Some(status) = shell_update {
+        publish_shell_status(&app, &status);
+    }
+
+    for item in &mut items {
+        item.is_unseen = false;
+    }
+    Ok(items)
 }
 
 #[tauri::command]

@@ -6,6 +6,7 @@ use serde_json::{Map, Value};
 const DEFAULT_LANGUAGE: &str = "ja";
 const DEFAULT_MAX_RESULTS: usize = 3;
 const MAX_RESULTS: usize = 25;
+const WIKIPEDIA_FALLBACK_IMAGE: &str = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20640%20360'%3E%3Crect%20width='640'%20height='360'%20rx='28'%20fill='%23f1f3f5'/%3E%3Ctext%20x='320'%20y='190'%20text-anchor='middle'%20font-family='Georgia,serif'%20font-size='58'%20fill='%23495057'%3EWikipedia%3C/text%3E%3C/svg%3E";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
@@ -130,7 +131,11 @@ fn parse_response(
                 config.language, page.pageid
             ),
             title: Some(page.title),
-            image_url: page.thumbnail.map(|thumbnail| thumbnail.source),
+            image_url: Some(
+                page.thumbnail
+                    .map(|thumbnail| thumbnail.source)
+                    .unwrap_or_else(|| WIKIPEDIA_FALLBACK_IMAGE.to_owned()),
+            ),
             author: None,
             published_at: None,
             fetched_at,
@@ -156,16 +161,20 @@ mod tests {
     }
 
     #[test]
-    fn api_pages_become_cache_items() {
+    fn api_pages_use_real_or_fallback_thumbnails() {
         let config = parse_config("{}").unwrap();
-        let body = r#"{"query":{"pages":[{"pageid":42,"title":"Example","thumbnail":{"source":"https://upload.wikimedia.org/example.jpg"}}]}}"#;
+        let body = r#"{"query":{"pages":[{"pageid":42,"title":"Example","thumbnail":{"source":"https://upload.wikimedia.org/example.jpg"}},{"pageid":43,"title":"No image"}]}}"#;
         let items = parse_response(body, &config, "{}", 123).unwrap();
-        assert_eq!(items.len(), 1);
+        assert_eq!(items.len(), 2);
         assert_eq!(items[0].id, "wikipedia:ja:42");
         assert_eq!(items[0].title.as_deref(), Some("Example"));
         assert_eq!(
             items[0].image_url.as_deref(),
             Some("https://upload.wikimedia.org/example.jpg")
+        );
+        assert_eq!(
+            items[1].image_url.as_deref(),
+            Some(WIKIPEDIA_FALLBACK_IMAGE)
         );
     }
 }

@@ -110,7 +110,9 @@ fn normalize_channel_reference(raw: &str) -> Result<String, String> {
         .strip_prefix("https://")
         .or_else(|| trimmed.strip_prefix("http://"))
         .unwrap_or(trimmed);
-    let without_www = without_scheme.strip_prefix("www.").unwrap_or(without_scheme);
+    let without_www = without_scheme
+        .strip_prefix("www.")
+        .unwrap_or(without_scheme);
 
     let candidate = if trimmed.starts_with('@') {
         trimmed
@@ -151,17 +153,16 @@ fn valid_handle(value: &str) -> bool {
     matches!(characters.next(), Some('@'))
         && characters.clone().next().is_some()
         && value.chars().count() <= 80
-        && characters.all(|character| {
-            !character.is_whitespace() && !matches!(character, '/' | '?' | '#')
-        })
+        && characters
+            .all(|character| !character.is_whitespace() && !matches!(character, '/' | '?' | '#'))
 }
 
 fn valid_channel_id(value: &str) -> bool {
     (20..=32).contains(&value.len())
         && value.starts_with("UC")
-        && value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
 }
 
 async fn resolve_channel_id(

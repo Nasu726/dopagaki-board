@@ -11,7 +11,8 @@ use tauri_plugin_opener::OpenerExt;
 
 const GRID_COLUMNS: f64 = 12.0;
 const GRID_ROWS: f64 = 8.0;
-const MIN_WIDGET_GRID_SIZE: f64 = 1.0;
+const MIN_WIDGET_COLUMNS: f64 = 3.0;
+const MIN_WIDGET_ROWS: f64 = 2.0;
 const MAX_SHORTCUT_LENGTH: usize = 128;
 const SHELL_STATUS_CHANGED_EVENT: &str = "shell-status-changed";
 
@@ -326,18 +327,24 @@ fn is_grid_integer(value: f64) -> bool {
     value.is_finite() && value.fract().abs() < f64::EPSILON
 }
 
-fn validate_grid_geometry(x: f64, y: f64, width: f64, height: f64) -> Result<(), String> {
-    let valid = [x, y, width, height].into_iter().all(is_grid_integer)
+fn is_stored_grid_geometry(x: f64, y: f64, width: f64, height: f64) -> bool {
+    [x, y, width, height].into_iter().all(is_grid_integer)
         && x >= 0.0
         && y >= 0.0
-        && width >= MIN_WIDGET_GRID_SIZE
-        && height >= MIN_WIDGET_GRID_SIZE
+        && width >= 1.0
+        && height >= 1.0
         && x + width <= GRID_COLUMNS
-        && y + height <= GRID_ROWS;
+        && y + height <= GRID_ROWS
+}
+
+fn validate_grid_geometry(x: f64, y: f64, width: f64, height: f64) -> Result<(), String> {
+    let valid = is_stored_grid_geometry(x, y, width, height)
+        && width >= MIN_WIDGET_COLUMNS
+        && height >= MIN_WIDGET_ROWS;
     if valid {
         Ok(())
     } else {
-        Err("widget geometry must be an integer rectangle inside the 12x8 Board grid".to_owned())
+        Err("widget geometry must be an integer rectangle of at least 3x2 inside the 12x8 Board grid".to_owned())
     }
 }
 
@@ -359,7 +366,7 @@ fn reject_overlap(
         .map_err(|error| format!("failed to validate Board geometry: {error}"))?;
     if widgets.iter().any(|widget| {
         Some(widget.id) != excluded_id
-            && validate_grid_geometry(widget.x, widget.y, widget.width, widget.height).is_ok()
+            && is_stored_grid_geometry(widget.x, widget.y, widget.width, widget.height)
             && rectangles_overlap(
                 (x, y, width, height),
                 (widget.x, widget.y, widget.width, widget.height),
@@ -395,13 +402,21 @@ mod tests {
     }
 
     #[test]
-    fn grid_geometry_is_integer_and_bounded() {
+    fn grid_geometry_is_integer_bounded_and_at_least_three_by_two() {
         assert!(validate_grid_geometry(0.0, 0.0, 4.0, 3.0).is_ok());
-        assert!(validate_grid_geometry(11.0, 7.0, 1.0, 1.0).is_ok());
+        assert!(validate_grid_geometry(9.0, 6.0, 3.0, 2.0).is_ok());
+        assert!(validate_grid_geometry(11.0, 7.0, 1.0, 1.0).is_err());
+        assert!(validate_grid_geometry(0.0, 0.0, 2.0, 2.0).is_err());
+        assert!(validate_grid_geometry(0.0, 0.0, 3.0, 1.0).is_err());
         assert!(validate_grid_geometry(-1.0, 0.0, 4.0, 3.0).is_err());
         assert!(validate_grid_geometry(0.5, 0.0, 4.0, 3.0).is_err());
         assert!(validate_grid_geometry(10.0, 0.0, 3.0, 2.0).is_err());
-        assert!(validate_grid_geometry(0.0, 0.0, 0.0, 2.0).is_err());
+    }
+
+    #[test]
+    fn legacy_small_grid_geometry_still_counts_for_overlap_checks() {
+        assert!(is_stored_grid_geometry(10.0, 7.0, 2.0, 1.0));
+        assert!(validate_grid_geometry(10.0, 7.0, 2.0, 1.0).is_err());
     }
 
     #[test]

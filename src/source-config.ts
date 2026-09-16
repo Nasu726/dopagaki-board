@@ -17,7 +17,7 @@ export type ZennSourceConfig = {
 };
 
 export type YouTubeSourceConfig = {
-  channelId: string;
+  channel: string;
   maxResults: number;
 };
 
@@ -99,10 +99,19 @@ export function readZennConfig(sourceConfigJson: string): ZennSourceConfig {
 
 export function readYouTubeConfig(sourceConfigJson: string): YouTubeSourceConfig {
   try {
-    const parsed = JSON.parse(sourceConfigJson) as Partial<YouTubeSourceConfig>;
+    const parsed = JSON.parse(sourceConfigJson) as {
+      channel?: unknown;
+      channelId?: unknown;
+      maxResults?: unknown;
+    };
+    const channel =
+      typeof parsed.channel === "string"
+        ? parsed.channel
+        : typeof parsed.channelId === "string"
+          ? parsed.channelId
+          : DEFAULT_YOUTUBE_CHANNEL_ID;
     return {
-      channelId:
-        typeof parsed.channelId === "string" ? parsed.channelId : DEFAULT_YOUTUBE_CHANNEL_ID,
+      channel,
       maxResults:
         typeof parsed.maxResults === "number" && Number.isFinite(parsed.maxResults)
           ? parsed.maxResults
@@ -110,7 +119,7 @@ export function readYouTubeConfig(sourceConfigJson: string): YouTubeSourceConfig
     };
   } catch {
     return {
-      channelId: DEFAULT_YOUTUBE_CHANNEL_ID,
+      channel: DEFAULT_YOUTUBE_CHANNEL_ID,
       maxResults: DEFAULT_YOUTUBE_MAX_RESULTS,
     };
   }
@@ -118,6 +127,28 @@ export function readYouTubeConfig(sourceConfigJson: string): YouTubeSourceConfig
 
 export function normalizeYouTubeChannelInput(value: string): string | null {
   const trimmed = value.trim();
-  const match = trimmed.match(/(?:^|\/channel\/)(UC[A-Za-z0-9_-]{18,30})(?:[\/?#]|$)/);
-  return match?.[1] ?? null;
+  if (!trimmed) {
+    return null;
+  }
+
+  const idMatch = trimmed.match(/(?:^|\/channel\/)(UC[A-Za-z0-9_-]{18,30})(?:[\/?#]|$)/);
+  if (idMatch?.[1]) {
+    return idMatch[1];
+  }
+
+  const handleMatch = trimmed.match(
+    /^(?:https?:\/\/(?:www\.)?youtube\.com\/)?(@[^\s\/?#]+)(?:[\/?#].*)?$/i,
+  );
+  if (handleMatch?.[1]) {
+    return handleMatch[1].toLocaleLowerCase();
+  }
+
+  const legacyUrlMatch = trimmed.match(
+    /^(?:https?:\/\/)?(?:www\.)?youtube\.com\/(c|user)\/([^\s\/?#]+)(?:[\/?#].*)?$/i,
+  );
+  if (legacyUrlMatch?.[1] && legacyUrlMatch[2]) {
+    return `https://www.youtube.com/${legacyUrlMatch[1].toLowerCase()}/${legacyUrlMatch[2]}`;
+  }
+
+  return null;
 }

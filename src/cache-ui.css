@@ -212,18 +212,6 @@
   text-align: center;
 }
 
-/*
- * Widget configuration is a focused Board task, not part of the widget's
- * content layout. Release widget containment and hover stacking while its
- * fixed editor is open so the editor participates in the root stacking
- * context above the Board-level backdrop.
- */
-.board-widget:has(> .board-widget-config) {
-  z-index: auto;
-  container-type: normal;
-  overflow: visible;
-}
-
 body:has(.board-widget-config)::before {
   content: "";
   position: fixed;

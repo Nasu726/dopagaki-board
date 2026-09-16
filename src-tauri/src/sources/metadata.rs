@@ -5,12 +5,9 @@ use std::time::Duration;
 const METADATA_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub(crate) async fn fetch_og_image(http: &Client, url: &str) -> Option<String> {
-    let body = fetch_text(
-        http.get(url).timeout(METADATA_TIMEOUT),
-        "article metadata",
-    )
-    .await
-    .ok()?;
+    let body = fetch_text(http.get(url).timeout(METADATA_TIMEOUT), "article metadata")
+        .await
+        .ok()?;
     extract_og_image(&body)
 }
 

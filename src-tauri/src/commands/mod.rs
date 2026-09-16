@@ -11,7 +11,8 @@ use tauri_plugin_opener::OpenerExt;
 
 const GRID_COLUMNS: f64 = 12.0;
 const GRID_ROWS: f64 = 8.0;
-const MIN_WIDGET_GRID_SIZE: f64 = 1.0;
+const MIN_WIDGET_GRID_WIDTH: f64 = 3.0;
+const MIN_WIDGET_GRID_HEIGHT: f64 = 2.0;
 const MAX_SHORTCUT_LENGTH: usize = 128;
 const SHELL_STATUS_CHANGED_EVENT: &str = "shell-status-changed";
 
@@ -330,14 +331,14 @@ fn validate_grid_geometry(x: f64, y: f64, width: f64, height: f64) -> Result<(),
     let valid = [x, y, width, height].into_iter().all(is_grid_integer)
         && x >= 0.0
         && y >= 0.0
-        && width >= MIN_WIDGET_GRID_SIZE
-        && height >= MIN_WIDGET_GRID_SIZE
+        && width >= MIN_WIDGET_GRID_WIDTH
+        && height >= MIN_WIDGET_GRID_HEIGHT
         && x + width <= GRID_COLUMNS
         && y + height <= GRID_ROWS;
     if valid {
         Ok(())
     } else {
-        Err("widget geometry must be an integer rectangle inside the 12x8 Board grid".to_owned())
+        Err("widget geometry must be an integer rectangle of at least 3x2 inside the 12x8 Board grid".to_owned())
     }
 }
 
@@ -395,13 +396,15 @@ mod tests {
     }
 
     #[test]
-    fn grid_geometry_is_integer_and_bounded() {
+    fn grid_geometry_is_integer_bounded_and_at_least_three_by_two() {
         assert!(validate_grid_geometry(0.0, 0.0, 4.0, 3.0).is_ok());
-        assert!(validate_grid_geometry(11.0, 7.0, 1.0, 1.0).is_ok());
+        assert!(validate_grid_geometry(9.0, 6.0, 3.0, 2.0).is_ok());
+        assert!(validate_grid_geometry(11.0, 7.0, 1.0, 1.0).is_err());
+        assert!(validate_grid_geometry(0.0, 0.0, 2.0, 2.0).is_err());
+        assert!(validate_grid_geometry(0.0, 0.0, 3.0, 1.0).is_err());
         assert!(validate_grid_geometry(-1.0, 0.0, 4.0, 3.0).is_err());
         assert!(validate_grid_geometry(0.5, 0.0, 4.0, 3.0).is_err());
         assert!(validate_grid_geometry(10.0, 0.0, 3.0, 2.0).is_err());
-        assert!(validate_grid_geometry(0.0, 0.0, 0.0, 2.0).is_err());
     }
 
     #[test]

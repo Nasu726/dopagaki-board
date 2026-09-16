@@ -1,5 +1,7 @@
+use crate::{db::widgets, sources};
 use rusqlite::{params, Connection, Result};
 use serde::Serialize;
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,19 +97,52 @@ pub(crate) fn mark_seen(connection: &Connection, ids: &[String]) -> Result<usize
     Ok(changed)
 }
 
+fn active_source_keys(connection: &Connection) -> Result<Vec<(String, String)>> {
+    let stored_widgets = widgets::list(connection)?;
+    let mut keys = BTreeSet::new();
+    for widget in stored_widgets {
+        if !sources::is_supported(&widget.source_kind) {
+            continue;
+        }
+        match sources::normalize_config(&widget.source_kind, &widget.source_config_json) {
+            Ok(normalized) => {
+                keys.insert((widget.source_kind, normalized));
+            }
+            Err(error) => {
+                eprintln!(
+                    "ignoring invalid {} widget configuration while computing unseen state: {error}",
+                    widget.source_kind
+                );
+            }
+        }
+    }
+    Ok(keys.into_iter().collect())
+}
+
 pub(crate) fn mark_active_widget_items_seen(connection: &Connection) -> Result<usize> {
-    connection.execute(
-        "UPDATE feed_items\n         SET is_unseen = 0\n         WHERE is_unseen = 1\n           AND EXISTS (\n             SELECT 1\n             FROM widgets\n             WHERE widgets.source_kind = feed_items.source_kind\n               AND widgets.source_config_json = feed_items.source_config_json\n           )",
-        [],
-    )
+    let source_keys = active_source_keys(connection)?;
+    let mut statement = connection.prepare(
+        "UPDATE feed_items\n         SET is_unseen = 0\n         WHERE is_unseen = 1 AND source_kind = ?1 AND source_config_json = ?2",
+    )?;
+    let mut changed = 0;
+    for (source_kind, source_config_json) in source_keys {
+        changed += statement.execute(params![source_kind, source_config_json])?;
+    }
+    Ok(changed)
 }
 
 pub(crate) fn has_unseen(connection: &Connection) -> Result<bool> {
-    connection.query_row(
-        "SELECT EXISTS(\n           SELECT 1\n           FROM feed_items\n           WHERE is_unseen = 1\n             AND EXISTS (\n               SELECT 1\n               FROM widgets\n               WHERE widgets.source_kind = feed_items.source_kind\n                 AND widgets.source_config_json = feed_items.source_config_json\n             )\n         )",
-        [],
-        |row| row.get(0),
-    )
+    let source_keys = active_source_keys(connection)?;
+    let mut statement = connection.prepare(
+        "SELECT EXISTS(\n           SELECT 1 FROM feed_items\n           WHERE is_unseen = 1 AND source_kind = ?1 AND source_config_json = ?2\n         )",
+    )?;
+    for (source_kind, source_config_json) in source_keys {
+        let found = statement.query_row(params![source_kind, source_config_json], |row| row.get(0))?;
+        if found {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn map_item(row: &rusqlite::Row<'_>) -> Result<CachedItem> {
@@ -173,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_unseen_ignores_orphaned_cache_and_board_acknowledges_active_sources() {
+    fn shell_unseen_uses_semantic_active_sources_and_ignores_orphaned_cache() {
         let connection = database();
         let active = write_item("{}", "Visible paper", 10);
         let mut orphaned = write_item(r#"{"query":"cat:cs.LG"}"#, "Orphaned paper", 20);
@@ -181,9 +216,15 @@ mod tests {
         upsert_items(&connection, &[active, orphaned]).expect("cache write should succeed");
 
         assert!(!has_unseen(&connection).expect("cache without widgets must not notify"));
-        widgets::create(&connection, "arxiv", 0.0, 0.0, 3.0, 2.0)
+        let widget = widgets::create(&connection, "arxiv", 0.0, 0.0, 3.0, 2.0)
             .expect("active widget should be created");
-        assert!(has_unseen(&connection).expect("active unseen cache should notify"));
+        widgets::update_source_config(
+            &connection,
+            widget.id,
+            r#"{"maxResults":3,"query":"cat:cs.AI"}"#,
+        )
+        .expect("legacy explicit defaults should persist");
+        assert!(has_unseen(&connection).expect("semantic default source should notify"));
 
         assert_eq!(
             mark_active_widget_items_seen(&connection).expect("Board acknowledgement should work"),

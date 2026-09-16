@@ -95,9 +95,16 @@ pub(crate) fn mark_seen(connection: &Connection, ids: &[String]) -> Result<usize
     Ok(changed)
 }
 
+pub(crate) fn mark_active_widget_items_seen(connection: &Connection) -> Result<usize> {
+    connection.execute(
+        "UPDATE feed_items\n         SET is_unseen = 0\n         WHERE is_unseen = 1\n           AND EXISTS (\n             SELECT 1\n             FROM widgets\n             WHERE widgets.source_kind = feed_items.source_kind\n               AND widgets.source_config_json = feed_items.source_config_json\n           )",
+        [],
+    )
+}
+
 pub(crate) fn has_unseen(connection: &Connection) -> Result<bool> {
     connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM feed_items WHERE is_unseen = 1)",
+        "SELECT EXISTS(\n           SELECT 1\n           FROM feed_items\n           WHERE is_unseen = 1\n             AND EXISTS (\n               SELECT 1\n               FROM widgets\n               WHERE widgets.source_kind = feed_items.source_kind\n                 AND widgets.source_config_json = feed_items.source_config_json\n             )\n         )",
         [],
         |row| row.get(0),
     )
@@ -123,7 +130,7 @@ fn map_item(row: &rusqlite::Row<'_>) -> Result<CachedItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::migrations;
+    use crate::db::{migrations, widgets};
 
     fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("SQLite should open");
@@ -150,6 +157,8 @@ mod tests {
     #[test]
     fn source_query_and_seen_state_work() {
         let connection = database();
+        widgets::create(&connection, "arxiv", 0.0, 0.0, 3.0, 2.0)
+            .expect("active widget should be created");
         let item = write_item("{}", "Cached paper", 123);
         upsert_items(&connection, &[item]).expect("cache write should succeed");
 
@@ -161,6 +170,35 @@ mod tests {
         mark_seen(&connection, &[arxiv[0].id.clone()]).expect("seen should update");
         let arxiv = list_for_source(&connection, "arxiv", "{}", 5).expect("source should read");
         assert!(!arxiv[0].is_unseen);
+    }
+
+    #[test]
+    fn shell_unseen_ignores_orphaned_cache_and_board_acknowledges_active_sources() {
+        let connection = database();
+        let active = write_item("{}", "Visible paper", 10);
+        let mut orphaned = write_item(r#"{"query":"cat:cs.LG"}"#, "Orphaned paper", 20);
+        orphaned.id = "2401.00002".to_owned();
+        upsert_items(&connection, &[active, orphaned]).expect("cache write should succeed");
+
+        assert!(!has_unseen(&connection).expect("cache without widgets must not notify"));
+        widgets::create(&connection, "arxiv", 0.0, 0.0, 3.0, 2.0)
+            .expect("active widget should be created");
+        assert!(has_unseen(&connection).expect("active unseen cache should notify"));
+
+        assert_eq!(
+            mark_active_widget_items_seen(&connection).expect("Board acknowledgement should work"),
+            1
+        );
+        assert!(!has_unseen(&connection).expect("active cache should now be seen"));
+
+        let orphaned_unseen: i64 = connection
+            .query_row(
+                "SELECT is_unseen FROM feed_items WHERE id = '2401.00002'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("orphaned cache row should remain");
+        assert_eq!(orphaned_unseen, 1);
     }
 
     #[test]

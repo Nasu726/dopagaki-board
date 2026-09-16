@@ -44,6 +44,14 @@ struct RssItem {
     guid: Option<String>,
     #[serde(rename = "pubDate", default)]
     pub_date: Option<String>,
+    #[serde(default)]
+    enclosure: Option<RssEnclosure>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RssEnclosure {
+    #[serde(rename = "@url")]
+    url: String,
 }
 
 pub(crate) async fn fetch(
@@ -134,13 +142,17 @@ fn parse_feed(
         .enumerate()
         .map(|(index, entry)| {
             let stable = entry.guid.as_deref().unwrap_or(&entry.link).trim();
+            let image_url = entry
+                .enclosure
+                .map(|enclosure| enclosure.url.trim().to_owned())
+                .filter(|url| url.starts_with("https://") || url.starts_with("http://"));
             CacheWriteItem {
                 id: format!("zenn:{stable}"),
                 source_kind: "zenn".to_owned(),
                 source_config_json: canonical_source_config_json.to_owned(),
                 external_url: entry.link,
                 title: Some(entry.title),
-                image_url: None,
+                image_url,
                 author: None,
                 published_at: None,
                 fetched_at,
@@ -167,14 +179,18 @@ mod tests {
     }
 
     #[test]
-    fn rss_items_become_cache_rows() {
-        let body = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Zenn</title><item><title>Example Zenn post</title><link>https://zenn.dev/example/articles/abc</link><guid>https://zenn.dev/example/articles/abc</guid><pubDate>Sun, 13 Sep 2026 00:00:00 GMT</pubDate></item></channel></rss>"#;
+    fn rss_items_use_enclosure_ogp_images() {
+        let body = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Zenn</title><item><title>Example Zenn post</title><link>https://zenn.dev/example/articles/abc</link><guid>https://zenn.dev/example/articles/abc</guid><pubDate>Sun, 13 Sep 2026 00:00:00 GMT</pubDate><enclosure url="https://res.cloudinary.com/zenn/image/upload/example.png" length="0" type="false"/></item></channel></rss>"#;
         let items = parse_feed(body, 12, "{}", 123).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title.as_deref(), Some("Example Zenn post"));
         assert_eq!(
             items[0].external_url,
             "https://zenn.dev/example/articles/abc"
+        );
+        assert_eq!(
+            items[0].image_url.as_deref(),
+            Some("https://res.cloudinary.com/zenn/image/upload/example.png")
         );
     }
 }

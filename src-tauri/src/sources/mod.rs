@@ -1,5 +1,6 @@
 pub(crate) mod arxiv;
 pub(crate) mod http;
+mod metadata;
 pub(crate) mod qiita;
 pub(crate) mod wikipedia;
 pub(crate) mod youtube;

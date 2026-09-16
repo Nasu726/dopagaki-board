@@ -1,4 +1,7 @@
-use super::http::{fetch_text, SourceFetchError};
+use super::{
+    http::{fetch_text, SourceFetchError},
+    metadata,
+};
 use crate::{db::cache::CacheWriteItem, source_config};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -6,6 +9,7 @@ use serde_json::{Map, Value};
 const DEFAULT_QUERY: &str = "";
 const DEFAULT_MAX_RESULTS: usize = 3;
 const MAX_RESULTS: usize = 25;
+const OGP_IMAGE_ENRICH_LIMIT: usize = 3;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
@@ -59,8 +63,17 @@ pub(crate) async fn fetch(
         request = request.query(&[("query", config.query.as_str())]);
     }
     let body = fetch_text(request, "Qiita").await?;
-    parse_response(&body, canonical_source_config_json, fetched_at)
-        .map_err(|error| SourceFetchError::decode("Qiita", error))
+    let mut items = parse_response(&body, canonical_source_config_json, fetched_at)
+        .map_err(|error| SourceFetchError::decode("Qiita", error))?;
+
+    // Qiita's item API does not expose the article OGP image. Enrich only the
+    // default glanceable set so thumbnails never turn a large configured feed
+    // into an unbounded burst of article-page requests.
+    for item in items.iter_mut().take(OGP_IMAGE_ENRICH_LIMIT) {
+        item.image_url = metadata::fetch_og_image(http, &item.external_url).await;
+    }
+
+    Ok(items)
 }
 
 pub(crate) fn normalize_config(input: &str) -> Result<String, String> {
@@ -149,12 +162,13 @@ mod tests {
     }
 
     #[test]
-    fn api_items_become_cache_rows() {
+    fn api_items_become_cache_rows_before_optional_metadata_enrichment() {
         let body = r#"[{"id":"abc123","title":"Rust on Qiita","url":"https://qiita.com/u/items/abc123","created_at":"2026-09-01T00:00:00+09:00","updated_at":"2026-09-01T00:00:00+09:00","likes_count":7,"user":{"id":"nasu","name":"Nasu"}}]"#;
         let items = parse_response(body, "{}", 123).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, "qiita:abc123");
         assert_eq!(items[0].author.as_deref(), Some("Nasu"));
+        assert_eq!(items[0].image_url, None);
         assert!(items[0].payload_json.contains("likesCount"));
     }
 }

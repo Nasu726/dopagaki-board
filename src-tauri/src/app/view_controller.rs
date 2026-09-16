@@ -1,4 +1,5 @@
 use super::{AppState, ViewEvent, ViewState};
+use crate::db;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager};
 
 const MAIN_WINDOW: &str = "main";
@@ -6,6 +7,7 @@ const IDLE_SIZE: (f64, f64) = (64.0, 64.0);
 const COMPACT_SIZE: (f64, f64) = (360.0, 480.0);
 const BOARD_SIZE: (f64, f64) = (920.0, 680.0);
 const VIEW_CHANGED_EVENT: &str = "view-state-changed";
+const SHELL_STATUS_CHANGED_EVENT: &str = "shell-status-changed";
 
 pub(crate) fn current(app: &AppHandle) -> Result<ViewState, String> {
     app.state::<AppState>()
@@ -34,7 +36,37 @@ pub(crate) fn transition(app: &AppHandle, event: ViewEvent) -> Result<ViewState,
     app.emit(VIEW_CHANGED_EVENT, next)
         .map_err(|error| format!("failed to emit view state: {error}"))?;
 
+    if next == ViewState::Board {
+        acknowledge_board_content(app)?;
+    }
+
     Ok(next)
+}
+
+fn acknowledge_board_content(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let (next, status_changed) = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
+        db::cache::mark_active_widget_items_seen(&connection)
+            .map_err(|error| format!("failed to acknowledge Board cache: {error}"))?;
+
+        let mut shell = state
+            .shell
+            .lock()
+            .map_err(|_| "shell status lock was poisoned".to_owned())?;
+        let status_changed = shell.has_unseen;
+        shell.has_unseen = false;
+        (shell.clone(), status_changed)
+    };
+
+    if status_changed {
+        app.emit(SHELL_STATUS_CHANGED_EVENT, next)
+            .map_err(|error| format!("failed to emit shell status: {error}"))?;
+    }
+    Ok(())
 }
 
 fn apply_view_state(app: &AppHandle, view: ViewState) -> Result<(), String> {

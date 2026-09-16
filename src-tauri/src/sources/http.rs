@@ -6,96 +6,58 @@ use std::fmt;
 
 const NON_RETRYABLE_HTTP_RETRY_FLOOR_SECONDS: u64 = 6 * 60 * 60;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SourceFetchErrorKind {
-    Transport,
-    RateLimited,
-    Server,
-    Client,
-    Decode,
-    InvalidConfig,
-    Other,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct SourceFetchError {
-    kind: SourceFetchErrorKind,
     message: String,
     retry_after_seconds: Option<u64>,
 }
 
 impl SourceFetchError {
     pub(crate) fn transport(source: &str, error: impl fmt::Display) -> Self {
-        Self::new(
-            SourceFetchErrorKind::Transport,
-            format!("{source} request failed: {error}"),
-            None,
-        )
+        Self::new(format!("{source} request failed: {error}"), None)
     }
 
     pub(crate) fn decode(source: &str, error: impl fmt::Display) -> Self {
-        Self::new(
-            SourceFetchErrorKind::Decode,
-            format!("failed to decode {source} response: {error}"),
-            None,
-        )
+        Self::new(format!("failed to decode {source} response: {error}"), None)
     }
 
     pub(crate) fn invalid_config(source: &str, error: impl fmt::Display) -> Self {
         Self::new(
-            SourceFetchErrorKind::InvalidConfig,
             format!("{source} configuration error: {error}"),
             Some(NON_RETRYABLE_HTTP_RETRY_FLOOR_SECONDS),
         )
     }
 
     pub(crate) fn other(source: &str, error: impl fmt::Display) -> Self {
-        Self::new(
-            SourceFetchErrorKind::Other,
-            format!("{source} refresh failed: {error}"),
-            None,
-        )
+        Self::new(format!("{source} refresh failed: {error}"), None)
     }
 
     fn from_status(source: &str, status: StatusCode, headers: &HeaderMap) -> Self {
-        let (kind, retry_after_seconds) = if status == StatusCode::TOO_MANY_REQUESTS {
-            (
-                SourceFetchErrorKind::RateLimited,
-                parse_retry_after_seconds(headers),
-            )
+        let retry_after_seconds = if status == StatusCode::TOO_MANY_REQUESTS {
+            parse_retry_after_seconds(headers)
         } else if status.is_server_error()
             || status == StatusCode::REQUEST_TIMEOUT
             || status == StatusCode::TOO_EARLY
         {
-            (SourceFetchErrorKind::Server, None)
+            None
         } else {
-            (
-                SourceFetchErrorKind::Client,
-                Some(NON_RETRYABLE_HTTP_RETRY_FLOOR_SECONDS),
-            )
+            Some(NON_RETRYABLE_HTTP_RETRY_FLOOR_SECONDS)
         };
 
         let retry_hint = retry_after_seconds
             .map(|seconds| format!("; retry after {seconds}s"))
             .unwrap_or_default();
         Self::new(
-            kind,
             format!("{source} returned HTTP {}{retry_hint}", status.as_u16()),
             retry_after_seconds,
         )
     }
 
-    fn new(kind: SourceFetchErrorKind, message: String, retry_after_seconds: Option<u64>) -> Self {
+    fn new(message: String, retry_after_seconds: Option<u64>) -> Self {
         Self {
-            kind,
             message,
             retry_after_seconds,
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn kind(&self) -> SourceFetchErrorKind {
-        self.kind
     }
 
     pub(crate) fn retry_floor_seconds(&self) -> Option<u64> {
@@ -152,7 +114,6 @@ mod tests {
         headers.insert(RETRY_AFTER, HeaderValue::from_static("900"));
         let error = SourceFetchError::from_status("Qiita", StatusCode::TOO_MANY_REQUESTS, &headers);
 
-        assert_eq!(error.kind(), SourceFetchErrorKind::RateLimited);
         assert_eq!(error.retry_floor_seconds(), Some(900));
         assert!(error.to_string().contains("HTTP 429"));
     }
@@ -183,12 +144,10 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE,
             &HeaderMap::new(),
         );
-        assert_eq!(server.kind(), SourceFetchErrorKind::Server);
         assert_eq!(server.retry_floor_seconds(), None);
 
         let client =
             SourceFetchError::from_status("Wikipedia", StatusCode::NOT_FOUND, &HeaderMap::new());
-        assert_eq!(client.kind(), SourceFetchErrorKind::Client);
         assert_eq!(
             client.retry_floor_seconds(),
             Some(NON_RETRYABLE_HTTP_RETRY_FLOOR_SECONDS)

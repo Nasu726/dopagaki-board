@@ -31,10 +31,11 @@ fn extract_og_image(html: &str) -> Option<String> {
             .as_deref()
             .is_some_and(|value| value.eq_ignore_ascii_case("og:image"))
         {
-            let content = html_attribute(tag, "content")?;
-            let decoded = decode_html_attribute(&content);
-            if decoded.starts_with("https://") || decoded.starts_with("http://") {
-                return Some(decoded);
+            if let Some(content) = html_attribute(tag, "content") {
+                let decoded = decode_html_attribute(&content);
+                if decoded.starts_with("https://") || decoded.starts_with("http://") {
+                    return Some(decoded);
+                }
             }
         }
 
@@ -124,6 +125,17 @@ mod tests {
             )
             .as_deref(),
             Some("https://example.com/second.jpg")
+        );
+    }
+
+    #[test]
+    fn skips_malformed_og_image_before_a_valid_one() {
+        assert_eq!(
+            extract_og_image(
+                r#"<meta property="og:image"><meta property="og:image" content="https://example.com/valid.png">"#,
+            )
+            .as_deref(),
+            Some("https://example.com/valid.png")
         );
     }
 

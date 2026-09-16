@@ -29,6 +29,7 @@ import {
   sliderPositionToSeconds,
   sourceAutoRefreshFloorSeconds,
 } from "./refresh-controls";
+import { isYouTubeConfigDormant } from "./source-config";
 import {
   closeOpenWidgetSettings,
   openWidgetSettings,
@@ -376,6 +377,7 @@ function renderBoard(): void {
 
   const canvas = document.querySelector<HTMLElement>(".board-canvas");
   canvas?.addEventListener("pointerdown", handleBoardPointerDown);
+  canvas?.addEventListener("click", handleBoardClick);
 
   bindAddPicker();
   bindSettings();
@@ -485,7 +487,7 @@ function renderWidgetMarkup(widget: WidgetLayout): string {
   const resizeMarkup = handles
     .map(
       (direction) =>
-        `<button class="board-widget__resize board-widget__resize--${direction}" data-resize-handle="${direction}" type="button" aria-label="Resize ${label} from ${direction}"></button>`,
+        `<button class="board-widget__resize board-widget__resize--${direction}" data-resize-handle="${direction}" type="button" tabindex="-1" aria-hidden="true"></button>`,
     )
     .join("");
 
@@ -1166,6 +1168,39 @@ function handleBoardPointerDown(event: PointerEvent): void {
   sourceRefreshFormError = null;
   document.querySelector(".settings-popover")?.remove();
   showAddPicker(addPoint);
+}
+
+function handleBoardClick(event: MouseEvent): void {
+  if (boardMode !== "select") {
+    return;
+  }
+
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+  const content = target.closest<HTMLElement>("[data-widget-content]");
+  const element = content?.closest<HTMLElement>("[data-widget-id]");
+  if (!content || !element) {
+    return;
+  }
+
+  const id = Number(element.dataset.widgetId);
+  if (!Number.isFinite(id)) {
+    return;
+  }
+  const widget = boardWidgets.find((item) => item.id === id);
+  if (
+    !widget ||
+    widget.sourceKind !== "youtube" ||
+    !isYouTubeConfigDormant(widget.sourceConfigJson)
+  ) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  openWidgetConfigEditor(element, id);
 }
 
 function bindWidgetInteractions(): void {

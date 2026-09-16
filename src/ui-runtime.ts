@@ -1,7 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import "./interaction-fixes.css";
 
 const appWindow = getCurrentWindow();
+const appRoot = document.querySelector<HTMLElement>("#app");
 
 function isInteractiveTarget(target: Element): boolean {
   return Boolean(
@@ -24,7 +24,8 @@ function markResizeHandlesPointerOnly(root: ParentNode): void {
   }
 }
 
-markResizeHandlesPointerOnly(document);
+const resizeHandleRoot: ParentNode = appRoot ?? document;
+markResizeHandlesPointerOnly(resizeHandleRoot);
 
 const resizeObserver = new MutationObserver((records) => {
   for (const record of records) {
@@ -35,7 +36,7 @@ const resizeObserver = new MutationObserver((records) => {
     }
   }
 });
-resizeObserver.observe(document.documentElement, { childList: true, subtree: true });
+resizeObserver.observe(appRoot ?? document.documentElement, { childList: true, subtree: true });
 
 document.addEventListener(
   "mousedown",

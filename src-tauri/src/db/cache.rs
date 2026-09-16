@@ -125,7 +125,8 @@ pub(crate) fn has_unseen(connection: &Connection) -> Result<bool> {
         "SELECT EXISTS(\n           SELECT 1 FROM feed_items\n           WHERE is_unseen = 1 AND source_kind = ?1 AND source_config_json = ?2\n         )",
     )?;
     for (source_kind, source_config_json) in source_keys {
-        let found = statement.query_row(params![source_kind, source_config_json], |row| row.get(0))?;
+        let found =
+            statement.query_row(params![source_kind, source_config_json], |row| row.get(0))?;
         if found {
             return Ok(true);
         }

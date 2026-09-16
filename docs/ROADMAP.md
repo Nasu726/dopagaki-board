@@ -1,96 +1,63 @@
 # Roadmap
 
-Current checkpoint (2026-09-15): **functional MVP is in a real-use maintenance pass.** The Tauri shell, four-state loop, responsive 12×8 Board, SQLite cache/scheduler, source-aware refresh policy, five working public-source presentations, notification-area controls, and source-scoped retry/backoff behavior are on `main`.
+Current checkpoint (2026-09-16): **the five-source functional MVP is implemented and in real-use maintenance.** Historical completion details belong in GitHub Issues/PRs; this document keeps only the current and future implementation direction.
 
-The current priority is to simplify and verify that baseline before another broad feature expansion: extract/redesign widget settings (#54/#61), finish the glanceable result-count defaults and resize smoke (#60), complete remaining Windows shell checks (#59/#66), and keep the lightweightness/docs passes active (#57/#63). Optional YouTube Data API work remains #53.
+## Current — simplify and verify the baseline
 
-## Phase 0 — durable specification
+Keep the existing arXiv, Wikipedia, Qiita, Zenn, and YouTube RSS product stable while reducing maintenance/runtime residue introduced during rapid real-device fixes.
 
-- [x] Repository and durable product/architecture docs.
-- [x] Decision log and handoff protocol.
-- [x] Documentation roles clarified so transient branch state does not masquerade as durable specification.
+- remove obsolete draft work and one-off patch layers that no longer own a durable responsibility
+- keep frontend/Rust source defaults and canonical source identity aligned
+- preserve cache-first startup, event/deadline-driven refresh, narrow Board rehydration, and bounded network work
+- finish the consolidated Windows release-build smoke for the still-open verification issues (#59, #60, #61, #62, #66, #79, #87, #88, #89, #90)
+- after interaction smoke is stable, run the #63 resident-performance gate from `PERF_BASELINE.md`
+- fix visible or measured regressions before another broad feature batch
 
-## Phase 1 — smallest runnable shell
+The current maintenance branch also audits whether files/dependencies/observers/listeners still justify their permanent resident and maintenance cost. Structural cleanup should remove accidental patch layering without inventing abstractions merely to make files smaller.
 
-- [x] Tauri 2 + Rust core boundary.
-- [x] SQLite and migrations/data-directory handling.
-- [x] Minimal frontend/Rust command boundary.
-- [x] Reproducible baseline tooling and first real Windows resident observation.
-- [x] First explicit deletion/simplification pass.
+## Next — close remaining baseline usability gaps
 
-## Phase 2 — core state loop
+The public-source baseline should be comfortable in ordinary daily use before expanding scope.
 
-- [x] Hidden / Idle / Compact / Board state model.
-- [x] Transparent Idle orb + boolean update badge.
-- [x] Cache-driven Compact and configurable global shortcut.
-- [x] Compact external launch -> Idle without waiting for network.
-- [x] Taskbar-free resident shell with notification-area controls.
-- [ ] Continue real-device transition/startup/shell verification as behavior evolves.
+- finish YouTube human-facing channel setup (#90): normal handles/URLs already work without a Data API key, but resolution should avoid unnecessary repeated channel-page work and retain stable canonical source identity
+- finish representative small/medium/large widget and shell interaction verification
+- keep image enrichment bounded; remote-image failure must always degrade to usable text
+- decide cached-data retention/eviction only when real usage provides enough evidence for a useful policy
 
-## Phase 3 — responsive Board
+## Optional YouTube Data API — #53
 
-- [x] Empty-space add flow.
-- [x] Responsive logical 12×8 grid persistence.
-- [x] Grid-snapped drag and eight-direction resize.
-- [x] Non-overlap without neighbor push/reflow.
-- [x] Gesture-end persistence and legacy pixel-layout conversion.
-- [x] Size-aware feed presentation through lightweight container queries.
-- [ ] Finish real-device review across representative widget/window sizes (#60).
-- [ ] Introduce explicit Select/Add interaction modes after the settings surface stabilizes (#62).
+RSS remains the credential-free new-video transport. Data API support is optional and additive.
 
-## Phase 4 — cache and scheduler
+The first API-assisted slice should focus only on capabilities that actually require the API:
 
-- [x] Source-scoped SQLite cache identity and canonical config.
-- [x] Cache-first presentation.
-- [x] Event/deadline-driven scheduler with bounded concurrency and persisted backoff.
-- [x] Narrow refresh-path DB queries and narrow cache-change UI updates.
-- [x] Global/source/widget refresh resolution with OFF and manual refresh.
-- [x] Shared-source scheduling by canonical source identity.
-- [x] Shared HTTP failure classification with rate-limit retry floors persisted per source instance.
+1. decide lightweight local storage for a user-supplied API key
+2. add key validation/removal UI
+3. add bounded visible metadata enrichment where it materially improves the click decision
+4. add explicitly quota-bounded candidate discovery only after ordinary RSS use is proven
 
-## Phase 5 — real adapters
+Handle/normal-channel-URL support is no longer a reason to require Data API configuration. API absence, failure, or quota exhaustion must preserve RSS functionality.
 
-1. [x] arXiv — Atom metadata, editable query/result count, 24 h automatic floor, serialized request gate.
-2. [x] Wikipedia — random MediaWiki discovery + PageImages, language/result settings, 6 h floor.
-3. [x] Qiita — public items API + optional query, 1 h floor.
-4. [x] Zenn — public trend/user/topic RSS, 1 h floor.
-5. [x] YouTube RSS — selected-channel public RSS, thumbnails, typed channel/result settings, manual/source-aware refresh, 1 h floor.
-6. [ ] YouTube Data API enrichment — optional user-supplied key with RSS fallback; tracked by #53.
-7. [ ] YouTube OAuth/subscription-aware discovery — later update after practical non-OAuth use is proven.
+OAuth/subscription-aware discovery remains later work and requires explicit credential/scope/retention decisions before implementation.
 
-The five-source public baseline is merged. Remaining source-adjacent work is product polish/verification and optional API-assisted expansion rather than an adapter merge gate.
+## Recommendation
 
-## Phase 6 — settings and maintainability
+Recommendation/ranking remains application-owned. RSS/API/OAuth may broaden the candidate pool, but ranking stays separate from transport.
 
-- [ ] Extract cohesive source/widget configuration logic from the frontend monolith (#54).
-- [ ] Move widget configuration into a dedicated editing surface with clear source/refresh grouping (#61).
-- [ ] Allow exact automatic-refresh interval entry while keeping the slider synchronized (#61).
-- [ ] Keep Rust as the authoritative validation/canonicalization boundary and preserve narrow rehydration.
+Start with transparent bounded heuristics using freshness, shown/click state, source/channel preference, and controlled randomness. Tune only after real usage data exists; do not build a broad crawler before there is evidence it improves discovery.
 
-## Phase 7 — API-assisted discovery and media discipline
+## Recurring simplification and measurement
 
-Add Data API capability incrementally, beginning with `@handle` resolution/validation and only then useful visible metadata or bounded candidate discovery. API credentials are user-supplied; API/background work stays bounded to useful results.
+This is a permanent development loop rather than a final phase:
 
-For media loading: visible thumbnails first; near-visible preload only when justified; off-screen preload only after measurement; foreground work always wins.
+`Implement -> Test -> Measure -> Refactor -> Delete -> Measure again -> Next feature`
 
-## Phase 8 — recommendation
+After meaningful feature batches:
 
-Recommendation/ranking is application-owned. RSS/API/OAuth may broaden the candidate pool, while ranking remains separate and bounded by cache/quota budgets.
+- remove unnecessary dependencies, DOM/state work, listeners/observers, polling, duplicate I/O, and broad rehydration
+- verify that Hidden/Idle still avoid feed rendering/media work
+- measure rather than infer CPU/RSS/network improvements
+- keep Linux/Windows/macOS release-build CI green and use real-device smoke where CI cannot establish GUI behavior
 
-Start with transparent heuristics: freshness, already-shown penalty, click history, channel preference, and controlled randomness. Tune only after real usage data exists.
+## Native implementation decision
 
-## Phase 9 — recurring simplification and real use
-
-This is a loop, not an end phase:
-
-1. stabilize and validate a feature batch
-2. measure representative resident/interaction behavior
-3. remove unnecessary dependencies, DOM/state work, polling, duplicate I/O, and broad rehydration
-4. use the app daily and fix observed friction
-5. repeat before the next broad feature batch
-
-Performance wins require measurement rather than inference from structural refactors alone.
-
-## Phase 10 — native decision
-
-Only after product value is proven, compare Tauri against measured pain points: resident memory, idle CPU, startup, window behavior, and OS integration. A native rewrite is justified only by concrete benefit large enough to offset maintaining platform-specific implementations.
+Do not rewrite the Tauri/WebView shell for aesthetic reasons. Revisit native UI only if measured resident memory, idle CPU, startup, window behavior, or OS integration becomes a concrete limitation large enough to justify platform-specific maintenance.

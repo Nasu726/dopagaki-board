@@ -2,8 +2,8 @@ export const GRID_COLUMNS = 12;
 export const GRID_ROWS = 8;
 export const DEFAULT_WIDGET_COLUMNS = 4;
 export const DEFAULT_WIDGET_ROWS = 3;
-export const MIN_WIDGET_COLUMNS = 1;
-export const MIN_WIDGET_ROWS = 1;
+export const MIN_WIDGET_COLUMNS = 3;
+export const MIN_WIDGET_ROWS = 2;
 
 export type GridRect = {
   x: number;
@@ -155,6 +155,24 @@ export function resizeGridRect(
 }
 
 export function legacyPixelsToGrid(rect: GridRect): GridRect {
+  // A pre-existing logical-grid rectangle may be smaller than a newer product
+  // minimum. Preserve that old logical rectangle as the migration fallback.
+  // normalizeLoadedWidgets() will first ask findNearestFreeRect() for a 3×2+
+  // placement; only an over-capacity legacy board falls back to this old size,
+  // which is preferable to introducing overlap.
+  const logicalScale =
+    Math.abs(rect.x) <= GRID_COLUMNS &&
+    Math.abs(rect.y) <= GRID_ROWS &&
+    Math.abs(rect.width) <= GRID_COLUMNS &&
+    Math.abs(rect.height) <= GRID_ROWS;
+  if (logicalScale) {
+    const width = clamp(Math.round(rect.width), 1, GRID_COLUMNS);
+    const height = clamp(Math.round(rect.height), 1, GRID_ROWS);
+    const x = clamp(Math.round(rect.x), 0, GRID_COLUMNS - width);
+    const y = clamp(Math.round(rect.y), 0, GRID_ROWS - height);
+    return { x, y, width, height };
+  }
+
   // The pre-grid Board was nominally ~900×614 CSS px. Conversion is only
   // used when persisted values are clearly not already logical grid units.
   return clampGridRect({

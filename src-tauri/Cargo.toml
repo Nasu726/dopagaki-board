@@ -5,6 +5,9 @@ description = "Lightweight desktop discovery board for ambient feeds and one-cli
 authors = ["nasu"]
 edition = "2021"
 
+[lints.rust]
+warnings = "deny"
+
 [lib]
 name = "dopagaki_board_lib"
 crate-type = ["lib", "cdylib", "staticlib"]

@@ -39,11 +39,6 @@ pub fn run() {
             let db_path = app_data_dir.join("dopagaki-board.sqlite3");
             let connection = db::open(&db_path)?;
 
-            // Early MVP builds seeded fake source rows so cache-first UI could be
-            // exercised before an adapter existed. They must never leak into the
-            // practical product once real adapters are available.
-            connection.execute("DELETE FROM feed_items WHERE id LIKE 'demo:%'", [])?;
-
             let global_shortcut = db::get_setting(&connection, app::GLOBAL_SHORTCUT_SETTING_KEY)?
                 .unwrap_or_else(|| app::DEFAULT_GLOBAL_SHORTCUT.to_owned());
             let has_unseen = db::cache::has_unseen(&connection)?;

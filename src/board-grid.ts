@@ -2,8 +2,8 @@ export const GRID_COLUMNS = 12;
 export const GRID_ROWS = 8;
 export const DEFAULT_WIDGET_COLUMNS = 4;
 export const DEFAULT_WIDGET_ROWS = 3;
-export const MIN_WIDGET_COLUMNS = 1;
-export const MIN_WIDGET_ROWS = 1;
+export const MIN_WIDGET_COLUMNS = 3;
+export const MIN_WIDGET_ROWS = 2;
 
 export type GridRect = {
   x: number;
@@ -23,12 +23,15 @@ export function clampGridRect(rect: GridRect): GridRect {
 }
 
 export function isValidGridRect(rect: GridRect): boolean {
+  // This predicate distinguishes already-logical grid geometry from the old
+  // pixel-based format during migration. Product minimums are enforced by
+  // clampGridRect/resizeGridRect and by the Rust command boundary.
   return (
     Object.values(rect).every(Number.isInteger) &&
     rect.x >= 0 &&
     rect.y >= 0 &&
-    rect.width >= MIN_WIDGET_COLUMNS &&
-    rect.height >= MIN_WIDGET_ROWS &&
+    rect.width >= 1 &&
+    rect.height >= 1 &&
     rect.x + rect.width <= GRID_COLUMNS &&
     rect.y + rect.height <= GRID_ROWS
   );

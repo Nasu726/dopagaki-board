@@ -39,7 +39,6 @@ import "./ui-runtime";
 import "./styles.css";
 import "./cache-ui.css";
 import "./board-mode.css";
-import "./refresh-settings-exact.css";
 
 type ViewState = "hidden" | "idle" | "compact" | "board";
 type ViewEvent =

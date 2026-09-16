@@ -1,6 +1,6 @@
 use super::publish_shell_status;
 use crate::{
-    app::{AppState, ShellStatus},
+    app::{AppState, ShellStatus, ViewState},
     db::{self, cache::CachedItem},
     refresh_policy, refresh_settings, runtime, sources,
 };
@@ -203,13 +203,29 @@ pub(crate) fn list_cached_items_for_source(
     }
     let source_config_json = sources::normalize_config(&source_kind, &source_config_json)?;
 
-    let (mut items, has_unseen) = {
+    let mut items = {
         let connection = state
             .db
             .lock()
             .map_err(|_| "database lock was poisoned".to_owned())?;
-        let items = db::cache::list_for_source(&connection, &source_kind, &source_config_json, limit)
-            .map_err(|error| format!("failed to read source cache: {error}"))?;
+        db::cache::list_for_source(&connection, &source_kind, &source_config_json, limit)
+            .map_err(|error| format!("failed to read source cache: {error}"))?
+    };
+
+    let board_visible = state
+        .view
+        .lock()
+        .map(|view| *view == ViewState::Board)
+        .map_err(|_| "view state lock was poisoned".to_owned())?;
+    if !board_visible {
+        return Ok(items);
+    }
+
+    let has_unseen = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "database lock was poisoned".to_owned())?;
         let unseen_ids: Vec<String> = items
             .iter()
             .filter(|item| item.is_unseen)
@@ -219,9 +235,8 @@ pub(crate) fn list_cached_items_for_source(
             db::cache::mark_seen(&connection, &unseen_ids)
                 .map_err(|error| format!("failed to mark Board cache seen: {error}"))?;
         }
-        let has_unseen = db::cache::has_unseen(&connection)
-            .map_err(|error| format!("failed to read unseen cache state: {error}"))?;
-        (items, has_unseen)
+        db::cache::has_unseen(&connection)
+            .map_err(|error| format!("failed to read unseen cache state: {error}"))?
     };
 
     let shell_update = {

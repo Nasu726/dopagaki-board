@@ -1,7 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import "./interaction-fixes.css";
 
 const appWindow = getCurrentWindow();
+const appRoot = document.querySelector<HTMLElement>("#app");
 
 function isInteractiveTarget(target: Element): boolean {
   return Boolean(
@@ -24,18 +24,23 @@ function markResizeHandlesPointerOnly(root: ParentNode): void {
   }
 }
 
-markResizeHandlesPointerOnly(document);
+const resizeHandleRoot: ParentNode = appRoot ?? document;
+markResizeHandlesPointerOnly(resizeHandleRoot);
 
-const resizeObserver = new MutationObserver((records) => {
-  for (const record of records) {
-    for (const node of record.addedNodes) {
-      if (node instanceof HTMLElement) {
-        markResizeHandlesPointerOnly(node);
+// Full view renders replace #app's direct child. Scan that newly inserted view once
+// rather than observing every descendant mutation in the application DOM.
+if (appRoot) {
+  const resizeObserver = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node instanceof HTMLElement) {
+          markResizeHandlesPointerOnly(node);
+        }
       }
     }
-  }
-});
-resizeObserver.observe(document.documentElement, { childList: true, subtree: true });
+  });
+  resizeObserver.observe(appRoot, { childList: true });
+}
 
 document.addEventListener(
   "mousedown",

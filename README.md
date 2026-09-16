@@ -4,9 +4,9 @@ Lightweight desktop discovery board for ambient feeds and one-click content acce
 
 ## Status
 
-The functional MVP is in real-use expansion. The app is Tauri 2 + a Rust core + local SQLite with a deliberately small Vanilla TypeScript/WebView presentation layer.
+The functional MVP is in real-use maintenance. The app is Tauri 2 + a Rust core + local SQLite with a deliberately small Vanilla TypeScript/WebView presentation layer.
 
-Working source adapters are **arXiv, Wikipedia, Qiita, Zenn, and selected-channel YouTube RSS**. YouTube RSS works without Google credentials. Optional YouTube Data API enrichment will use a user-supplied key, with OAuth/subscription-aware discovery deferred to a later update.
+Working source adapters are **arXiv, Wikipedia, Qiita, Zenn, and selected-channel YouTube RSS**. YouTube RSS works without Google credentials and accepts ordinary handles/channel URLs as well as raw channel IDs. Optional YouTube Data API enrichment will use a user-supplied key only for capabilities that actually need the API; OAuth/subscription-aware discovery is deferred.
 
 The first practical Windows release-build observation measured about 109 MB Idle memory with Task Manager displaying 0% CPU and 0 Mbps network traffic during the observation. Treat this as a practical baseline, not a lab benchmark; details and caveats are in `docs/PERF_BASELINE.md`.
 
@@ -18,8 +18,8 @@ Keep interesting sources quietly present on the desktop without demanding attent
 
 - **Idle:** tiny transparent orb; no feed DOM or media work.
 - **Compact:** up to three cached items from currently active Board sources, prioritized by Board position; opening content collapses back to Idle.
-- **Board:** responsive 12×8 logical grid. Widgets can use different integer sizes, cannot overlap, move by grid snapping, and resize from every edge/corner.
-- Click empty Board space to add a working source near that point.
+- **Board:** responsive 12×8 logical grid. Widgets use integer rectangles with a current 3×2 minimum, cannot overlap, move by grid snapping, and resize from every edge/corner.
+- Board opens in **Select** mode; empty-space clicks are harmless. Switch to **Add**, then click empty space to choose placement and a source.
 - Global shortcut and refresh settings live behind the gear/settings surface.
 - Source configuration is widget-local; refresh/cache work is shared by canonical source identity rather than duplicated per widget.
 
@@ -43,7 +43,7 @@ Use each document for one job instead of copying the same status everywhere:
 - `docs/REFRESH_POLICY.md` — refresh-resolution semantics.
 - `docs/PERFORMANCE.md` — performance budgets and measurement discipline.
 - `docs/PERF_BASELINE.md` — measured observations and reproducible procedures.
-- `docs/ROADMAP.md` — completed/current/future implementation stages.
+- `docs/ROADMAP.md` — current and future implementation direction.
 - `docs/DECISIONS.md` — settled choices and deliberately open questions.
 - `docs/ACTIVE_WORK.md` — short-lived branch checkpoint and immediate next gate.
 - `docs/HANDOFF.md` — durable implementation knowledge, incidents, and restart traps.

@@ -2,7 +2,7 @@
 
 Durable implementation knowledge for restarting work after a long gap or interrupted session. Current branch/PR/CI state is owned by GitHub plus `ACTIVE_WORK.md`; product behavior is owned by the product/UX documents.
 
-Last reconciled: 2026-09-15.
+Last reconciled: 2026-09-16.
 
 ## Restart protocol
 
@@ -39,9 +39,11 @@ Startup is cache-first; network completion is never on the critical startup path
 
 Hidden/Idle do no feed DOM/layout/media work. Compact only considers sources represented by current Board widgets; deleted-source stale cache must not keep a source in Compact. Default Compact source priority follows Board spatial order, top-to-bottom then left-to-right.
 
+Unseen/Idle-badge state is also scoped to currently active semantic Board sources. Board items are acknowledged only when Board hydration actually renders them while Board is still visible; Compact acknowledges only items rendered in Compact.
+
 ## Board and shell invariants
 
-Board persistence is a responsive logical **12×8 integer grid**. Widgets are integer rectangles, never overlap, and never implicitly push/reflow neighbors. Drag/resize updates the DOM during the gesture and persists geometry once at gesture end.
+Board persistence is a responsive logical **12×8 integer grid** with a **3×2 minimum widget size**. Widgets are integer rectangles, never overlap, and never implicitly push/reflow neighbors. Drag/resize updates the DOM during the gesture and persists geometry once at gesture end.
 
 Feed rows must work with and without images. Do not reserve a phantom image column for text-only sources.
 
@@ -49,19 +51,37 @@ The main window remains taskbar-free. Resident controls use the native system tr
 
 On Windows/macOS, Idle disables the native window shadow so the 64×64 transparent host does not reveal a square outline around the circular Idle UI. Compact/Board restore their native shadow. Preserve this distinction when changing window state code.
 
+Windows real-device testing showed declarative `data-tauri-drag-region` alone was unreliable. The frontend therefore also owns one explicit native `startDragging()` path from the shared Compact/Board `.window-drag-region`. Keep widget controls outside that interaction path.
+
 ## Source-specific constraints
 
 ### arXiv
 
 The Atom endpoint is sorted by submitted date descending. Requests share one serialized adapter gate and request starts remain at least 3 seconds apart. Stable cache ids strip version suffixes. Scheduler retry/backoff and this request-spacing gate are separate mechanisms; preserve both.
 
+### Wikipedia
+
+Use MediaWiki/PageImages when an article has an image. No-image rows use a lightweight local fallback; remote-image failure must still leave usable text.
+
+### Qiita
+
+The Item API does not expose article OGP artwork directly. Current enrichment is best-effort and bounded to the first three items with a short timeout. Do not turn this into unbounded N-page crawling merely to fill thumbnails.
+
+### Zenn
+
+Use RSS `<enclosure>` artwork when present. This requires no extra per-article request.
+
 ### YouTube
 
-Selected-channel RSS is the no-key baseline. Raw `UC...` IDs and `/channel/UC...` URLs work without another API request.
+Selected-channel RSS is the no-key baseline.
 
-An empty channel id is a valid dormant setup state: the adapter returns before HTTP and does not record failure/backoff. Cancelling initial YouTube configuration keeps the new dormant widget so setup can be retried without recreating placement.
+The canonical editable field is `channel`; legacy stored `channelId` is accepted as a migration alias. Raw `UC...` IDs and `/channel/UC...` URLs resolve without another page request. Ordinary `@handle`, handle URLs, and supported legacy `/c/...` or `/user/...` URLs are accepted without a Data API key; when RSS needs an internal channel id, the adapter resolves those human-facing references from the public channel page.
 
-Optional Data API work is #53. Users supply their own key; never embed a shared project key. RSS remains the fallback. Recommendation/ranking stays application-owned; do not assume the Data API exposes the user's current YouTube Home feed.
+An empty channel is a valid dormant setup state: the adapter returns before HTTP and does not record failure/backoff. Cancelling initial YouTube configuration keeps the new dormant widget so setup can be retried without recreating placement.
+
+#90 remains the authority for the remaining setup-path verification/refinement, including avoiding unnecessary repeated channel-page resolution while preserving canonical source identity.
+
+Optional Data API work is #53. Users supply their own key; never embed a shared project key. Handle/ordinary channel URL support is not dependent on #53. RSS remains the fallback. Data API work should be reserved for capabilities that actually need it, such as validation/enrichment/candidate discovery with explicit quota accounting. Recommendation/ranking stays application-owned; do not assume the Data API exposes the user's current YouTube Home feed.
 
 ## Tauri/platform traps
 

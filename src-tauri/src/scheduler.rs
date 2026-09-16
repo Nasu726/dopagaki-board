@@ -277,10 +277,6 @@ impl Scheduler {
             .map(|seconds| add_seconds(now, seconds));
     }
 
-    pub(crate) fn complete_failure(&mut self, key: &SourceKey, now: i64) {
-        self.complete_failure_with_retry_floor(key, now, None);
-    }
-
     pub(crate) fn complete_failure_with_retry_floor(
         &mut self,
         key: &SourceKey,
@@ -526,7 +522,7 @@ mod tests {
         let source = key("example");
         scheduler.request_manual(source.clone(), 0);
         assert_eq!(scheduler.pop_ready(0), Some(source.clone()));
-        scheduler.complete_failure(&source, 10);
+        scheduler.complete_failure_with_retry_floor(&source, 10, None);
         scheduler.request_manual(source, 11);
         assert_eq!(scheduler.next_wakeup_at(11), Some(70));
     }
@@ -538,13 +534,13 @@ mod tests {
         scheduler.sync_source(source.clone(), 0, Some(300));
         scheduler.request_manual(source.clone(), 0);
         assert_eq!(scheduler.pop_ready(0), Some(source.clone()));
-        scheduler.complete_failure(&source, 10);
+        scheduler.complete_failure_with_retry_floor(&source, 10, None);
         assert_eq!(scheduler.blocked_until(&source), Some(70));
 
         scheduler.request_manual(source.clone(), 11);
         assert_eq!(scheduler.pop_ready(69), None);
         assert_eq!(scheduler.pop_ready(70), Some(source.clone()));
-        scheduler.complete_failure(&source, 70);
+        scheduler.complete_failure_with_retry_floor(&source, 70, None);
         assert_eq!(scheduler.blocked_until(&source), Some(190));
     }
 

@@ -35,6 +35,7 @@ import {
   openWidgetSettings,
   type WidgetSettingsSaveInput,
 } from "./widget-settings";
+import "./ui-runtime";
 import "./styles.css";
 import "./cache-ui.css";
 import "./board-mode.css";

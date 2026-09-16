@@ -125,6 +125,10 @@ export function readYouTubeConfig(sourceConfigJson: string): YouTubeSourceConfig
   }
 }
 
+export function isYouTubeConfigDormant(sourceConfigJson: string): boolean {
+  return readYouTubeConfig(sourceConfigJson).channel.trim() === "";
+}
+
 export function normalizeYouTubeChannelInput(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) {

@@ -8,6 +8,7 @@ import {
   DEFAULT_WIKIPEDIA_MAX_RESULTS,
   DEFAULT_YOUTUBE_MAX_RESULTS,
   DEFAULT_ZENN_MAX_RESULTS,
+  isYouTubeConfigDormant,
   normalizeYouTubeChannelInput,
   readQuerySourceConfig,
   readWikipediaConfig,
@@ -48,6 +49,17 @@ test("typed source readers use sparse defaults without hiding explicit counts", 
   assert.equal(
     readYouTubeConfig('{"channelId":"UC123456789012345678","maxResults":4}').channel,
     "UC123456789012345678",
+  );
+});
+
+test("YouTube dormant state depends on source configuration, not cache emptiness", () => {
+  assert.equal(isYouTubeConfigDormant("{}"), true);
+  assert.equal(isYouTubeConfigDormant('{"maxResults":4}'), true);
+  assert.equal(isYouTubeConfigDormant('{"channel":"   "}'), true);
+  assert.equal(isYouTubeConfigDormant('{"channel":"@example"}'), false);
+  assert.equal(
+    isYouTubeConfigDormant('{"channelId":"UC123456789012345678"}'),
+    false,
   );
 });
 
